@@ -24,7 +24,7 @@
    THE SOFTWARE.
 """
 from __future__ import print_function
-import os, sys
+import os, sys, subprocess
 import click
 
 def _err(*objs):
@@ -63,11 +63,18 @@ def get_jdk(arch, major, minor, build):
 	if build is None:
 		build=JDK[major][minor]
 	minor = 'u' + str(minor) if minor > 0 else ''
-	cmd = 'wget --no-cookies --no-check-certificate --header "Cookie: gpw_e24=http%3A%2F%2Fwww.oracle.com%2F; oraclelicense=accept-securebackup-cookie" "http://download.oracle.com/otn-pub/java/jdk/{1}{2}-b{3}/jdk-{1}{2}-linux-{0}.tar.gz"'.format(arch, major, minor, build)
+	cookie = "gpw_e24=http%3A%2F%2Fwww.oracle.com%2F; oraclelicense=accept-securebackup-cookie"
+	url = "http://download.oracle.com/otn-pub/java/jdk/{1}{2}-b{3}/jdk-{1}{2}-linux-{0}.tar.gz".format(arch, major, minor, build)
+	if cmd_exists('wget'):
+		cmd = 'wget --no-cookies --no-check-certificate --header "Cookie: {0}" "{1}"'.format(cookie, url)
+	elif cmd_exists('curl'):
+		cmd = 'curl -O -L --insecure --cookie "{0}" "{1}"'.format(cookie, url)
+	else:
+		_err('error: wget or curl not found.')
 	os.system(cmd)
 
-MAVEN = { 'archive': ['2.0.8', '2.0.9', '2.0.10', '2.0.11', '2.1.0', '2.2.0', '2.2.1', '3.0', '3.0.1', '3.0.2', '3.0.3', '3.0.4', '3.0.4', '3.0.5', '3.1.0', '3.1.1', '3.2.1', '3.2.2'],
-          'current': ['3.0.5', '3.1.1', '3.2.1', '3.2.2', '3.2.3', '3.2.4', '3.2.5'],
+MAVEN = { 'archive': ['2.0.8', '2.0.9', '2.0.10', '2.0.11', '2.1.0', '2.2.0', '2.2.1', '3.0', '3.0.1', '3.0.2', '3.0.3', '3.0.4', '3.0.4', '3.0.5', '3.1.0', '3.1.1', '3.2.1', '3.2.2', '3.2.3', '3.2.4'],
+          'current': ['3.0.5', '3.1.1', '3.2.5'],
           'archive_url': 'http://archive.apache.org/dist/maven/binaries/',
           'current_url': 'http://mirror.nexcess.net/apache/maven/maven-3/'}
 
@@ -90,9 +97,17 @@ def get_mvn(version):
 		url = url_base + '/apache-maven-{0}-bin.tar.gz'.format(version)
 	else:
 		_err('Unknown Maven version.')
-	cmd = 'wget --no-cookies --no-check-certificate "{0}"'.format(url) 
+	if cmd_exists('wget'):
+		cmd = 'wget --no-cookies --no-check-certificate "{0}"'.format(url)
+	elif cmd_exists('curl'):
+		cmd = 'curl -O -L --insecure "{0}"'.format(url)
+	else:
+		_err('error: wget or curl not found.')
 	os.system(cmd)
 
+def cmd_exists(cmd):
+	return subprocess.call("type " + cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE) == 0
+ 
 @click.group()
 def cli():
 	pass
