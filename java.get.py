@@ -67,7 +67,7 @@ def get_jdk(arch, major, minor, build):
 	os.system(cmd)
 
 MAVEN = { 'archive': ['2.0.8', '2.0.9', '2.0.10', '2.0.11', '2.1.0', '2.2.0', '2.2.1', '3.0', '3.0.1', '3.0.2', '3.0.3', '3.0.4', '3.0.4', '3.0.5', '3.1.0', '3.1.1', '3.2.1', '3.2.2'],
-          'current': ['3.0.5', '3.1.1', '3.2.1', '3.2.2', '3.2.3'],
+          'current': ['3.0.5', '3.1.1', '3.2.1', '3.2.2', '3.2.3', '3.2.4', '3.2.5'],
           'archive_url': 'http://archive.apache.org/dist/maven/binaries/',
           'current_url': 'http://mirror.nexcess.net/apache/maven/maven-3/'}
 
@@ -77,7 +77,7 @@ def check_mvn(version):
 		raise click.UsageError('"{0}" is not a known version of Maven. Available versions: {1}'.format(version, mvn_list))
 
 def get_mvn_list():
-	versions = sorted(MAVEN['current']  + MAVEN['archive'], reverse=True)
+	versions = sorted(set(MAVEN['current']  + MAVEN['archive']), reverse=True)
 	return ', '.join(versions)
 
 def get_mvn(version):
