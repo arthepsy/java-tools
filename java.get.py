@@ -43,6 +43,7 @@ def _num(s):
 	except ValueError:
 		return float(s)
 
+JDK_ARCH = {'x64' : 'x64', 'x86_64': 'x64', 'i386': 'i586', 'i586': 'i586', 'i686': 'i586' }
 JDK = { 7: { 72: 14, 71: 14, 67: 1, 65: 17, 60: 19, 55: 13, 51: 13, 45: 18, 40: 43, 25: 15, 21: 12, 17: 2, 15: 3, 13: 20, 11: 21, 10: 18, 9: 5, 7: 10, 6: 24, 5: 6, 4: 20, 3: 4, 2: 13, 1: 8 },
         8: { 25: 17, 20: 26, 11: 12, 5: 13, 0: 132 }}
 def check_jdk(arch, major):
@@ -97,7 +98,7 @@ def cli():
 	pass
 
 @cli.command('jdk', short_help='download Java JDK')
-@click.argument('arch', metavar='<arch>', type=click.Choice(['x64', 'i586']))
+@click.argument('arch', metavar='<arch>', type=click.Choice(JDK_ARCH.keys()))
 @click.argument('major', metavar='<major>', type=click.Choice(['7', '8']))
 @click.argument('minor', metavar='<minor>', type=int, required=False)
 @click.option('--build', type=int)
@@ -109,6 +110,7 @@ def jdk(arch, major, minor, build):
 	<major> - [7|8]
 	<minor> - minor version
 	"""
+	arch = JDK_ARCH[arch]
 	if minor is None:
 		jdk_list = get_jdk_list(arch, _num(major))
 		_err('Available JDK{0} versions: {1}'.format(major, jdk_list))
