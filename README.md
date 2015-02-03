@@ -14,7 +14,6 @@ Java tools (e.g, jdk &amp; maven environment)
 
 * `java.class_name.sh` -- get fully qualified class name from .class file  
 
-  Requires [BCEL](http://commons.apache.org/proper/commons-bcel/). download and move it to `lib/bcel-5.2.jar`  
   ```
   ./java.class_name.sh misc.class
   misc.class: com.example.code.Domain$Trait$FieldHelper
