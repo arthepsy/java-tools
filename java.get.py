@@ -73,9 +73,10 @@ def get_jdk(arch, major, minor, build):
 		_err('error: wget or curl not found.')
 	os.system(cmd)
 
-MAVEN = { 'archive': ['2.0.8', '2.0.9', '2.0.10', '2.0.11', '2.1.0', '2.2.0', '2.2.1', '3.0', '3.0.1', '3.0.2', '3.0.3', '3.0.4', '3.0.4', '3.0.5', '3.1.0', '3.1.1', '3.2.1', '3.2.2', '3.2.3', '3.2.4'],
+MAVEN = { 'archive': ['2.0.8', '2.0.9', '2.0.10', '2.0.11', '2.1.0', '2.2.0', '2.2.1', '3.0', '3.0.1', '3.0.2', '3.0.3', '3.0.4', '3.0.4', '3.0.5', '3.1.0', '3.1.1', '3.2.1', '3.2.2', '3.2.3'],
           'current': ['3.0.5', '3.1.1', '3.2.5'],
-          'archive_url': 'http://archive.apache.org/dist/maven/binaries/',
+          'legacy_archive_url': 'http://archive.apache.org/dist/maven/binaries/',
+          'archive_url': 'http://archive.apache.org/dist/maven/maven-3/',
           'current_url': 'http://mirror.nexcess.net/apache/maven/maven-3/'}
 
 def check_mvn(version):
@@ -93,8 +94,12 @@ def get_mvn(version):
 		url_base = MAVEN['current_url'].rstrip('/')
 		url = url_base + '/{0}/binaries/apache-maven-{0}-bin.tar.gz'.format(version)
 	elif version in MAVEN['archive']:
-		url_base = MAVEN['archive_url'].rstrip('/')
-		url = url_base + '/apache-maven-{0}-bin.tar.gz'.format(version)
+		if version < '3.0.4':
+			url_base = MAVEN['legacy_archive_url'].rstrip('/')
+			url = url_base + '/apache-maven-{0}-bin.tar.gz'.format(version)
+		else:
+			url_base = MAVEN['archive_url'].rstrip('/')
+			url = url_base + '/' + version + '/binaries/apache-maven-{0}-bin.tar.gz'.format(version)
 	else:
 		_err('Unknown Maven version.')
 	if cmd_exists('wget'):
