@@ -420,7 +420,8 @@ class Pom():
 				pom_io = Pom.IO(pom_io)
 			if not os.path.isfile(pom_io.file_path):
 				return None
-			xtree = etree.parse(pom_io.file_path)
+			parser = etree.XMLParser(recover=True)
+			xtree = etree.parse(pom_io.file_path, parser)
 			xroot = xtree.getroot()
 			
 			artifact = Pom.Artifact.parse(xroot)
