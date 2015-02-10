@@ -181,7 +181,6 @@ class Pom():
 						modules[module_name] = module
 			for module_name in sorted(modules):
 				module = modules[module_name]
-				#print module_name, module
 				if parent is not None and parent != module.artifact.parent:
 					continue 
 				if module is not None:
@@ -243,12 +242,20 @@ class Pom():
 			return Pom.Xml.get_child_node_value(xroot, 'packaging', '')
 		
 		@staticmethod
+		def get_classifier(xroot):
+			return Pom.Xml.get_child_node_value(xroot, 'classifier', '')
+		
+		@staticmethod
 		def get_modules(xnode):
 			return Pom.Xml.get_nodes(xnode, 'module', 'modules')
 		
 		@staticmethod
 		def get_profiles(xnode):
 			return Pom.Xml.get_nodes(xnode, 'profile', 'profiles')
+		
+		@staticmethod
+		def get_properties(xnode):
+			return Pom.Xml.get_nodes(xnode, parent_name = 'properties')
 		
 		@staticmethod
 		def get_nodes(xnode, children_name=None, parent_name=None):
@@ -292,43 +299,220 @@ class Pom():
 			self.file_path = os.path.abspath(pom_file)
 			self.dir_path = os.path.abspath(os.path.dirname(pom_file))
 	
+	class Properties(dict):
+		def _get_item_keys(self, value, ignore_list = None):
+			keys = set(re.findall('\${([^}]*)}', value))
+			if ignore_list is not None:
+				for key in list(keys):
+					if key in ignore_list:
+						keys.remove(key)
+			return keys
+			
+		def expand_required(self, item_value = None, ignore_list = None):
+			if item_value is not None:
+				if ignore_list is None:
+					return item_value.find('${') != -1
+				else:
+					keys = self._get_item_keys(item_value, ignore_list)
+					return not len(keys) == 0
+			for value in self.values():
+				if self.expand_required(value, ignore_list):
+					return True
+			return False
+		
+		def expand_item(self, item_key):
+			self._expand_cache = {}
+			value = self._expand_item(item_key)
+			self._expand_cache = {}
+			return value
+		
+		def _expand_item(self, item_key):
+			stack = []
+			stack.append(item_key)
+			irreplaceable = set()
+			get_value = lambda k: self._expand_cache.get(k, self.get(k, None))
+			orig_key = item_key
+			while True:
+				item_key = stack.pop()
+				item_value = get_value(item_key)
+				if item_value is not None:
+					if self.expand_required(item_value):
+						replace_keys = self._get_item_keys(item_value)
+						for replace_key in list(replace_keys):
+							if replace_key in stack:
+								replace_keys.remove(replace_key)
+								irreplaceable.add(replace_key)
+								continue
+							replace_value = get_value(replace_key)
+							if replace_value is None:
+								replace_keys.remove(replace_key)
+								irreplaceable.add(replace_key)
+							elif not self.expand_required(replace_value, irreplaceable):
+								replace_keys.remove(replace_key)
+								item_value = item_value.replace('${' + replace_key + '}', replace_value)
+						if len(replace_keys) > 0:
+							stack.append(item_key)
+							for replace_key in replace_keys:
+								stack.append(replace_key)
+				self._expand_cache[item_key] = item_value
+				if len(stack) == 0:
+					break
+			return orig_key if item_value is None else item_value
+		
+		def expand_self(self):
+			self._expand_cache = {}
+			self._expand_self()
+			self._expand_cache = {}
+		
+		def _expand_self(self):
+			if not self.expand_required():
+				return
+			for k, v in self.items():
+				if self.expand_required(v):
+					self[k] = self._expand_item(k) 
+		
+		def expand_with(self, other_properties):
+			self._expand_cache = {}
+			self._expand_with(other_properties)
+			self._expand_cache = {}
+		
+		def _expand_with(self, other_properties):
+			if not hasattr(self, 'external'):
+				self.external = set()
+			updated = False
+			for k, v in other_properties.items():
+				if not k in self:
+					updated = True
+					self[k] = v
+					self.external.add(k)
+			if updated:
+				self._expand_self()
+		
+		def _add_build_properties(self, pom_io, xroot):
+			if pom_io is None:
+				return
+			self._expand_cache = {}
+			if not hasattr(self, 'internal'):
+				self.internal = set()
+			# initial
+			self['basedir'] = pom_io.dir_path
+			self['project.basedir'] = self['basedir']
+			self.internal.add('basedir')
+			self.internal.add('project.basedir')
+			# SuperPOM (build)
+			self['project.build.directory'] = self._expand_item('${project.basedir}/target')
+			self['project.build.outputDirectory'] = self._expand_item('${project.build.directory}/classes')
+			self['project.build.testOutputDirectory'] = self._expand_item('${project.build.directory}/test-classes')
+			self['project.build.sourceDirectory'] = self._expand_item('${project.basedir}/src/main/java')
+			self['project.build.scriptSourceDirectory'] = self._expand_item('${project.basedir}/src/main/scripts')
+			self['project.build.testSourceDirectory'] = self._expand_item('${project.basedir}/src/test/java')
+			self['project.build.resources.resource.directory'] = self._expand_item('${project.basedir}/src/main/resources')
+			self['project.build.testResources.testResource.directory'] = self._expand_item('${project.basedir}/src/test/resources')
+			self.internal.add('project.build.directory')
+			self.internal.add('project.build.outputDirectory')
+			self.internal.add('project.build.testOutputDirectory')
+			self.internal.add('project.build.sourceDirectory')
+			self.internal.add('project.build.scriptSourceDirectory')
+			self.internal.add('project.build.testSourceDirectory')
+			self.internal.add('project.build.resources.resource.directory')
+			self.internal.add('project.build.testResources.testResource.directory')
+			xbuild = Pom.Xml.get_node(xroot, 'build')
+			if xbuild is not None:
+				tags = ['directory', 'outputDirectory', 'testOutputDirectory', 'sourceDirectory', 'scriptSourceDirectory', 'testSourceDirectory']
+				tagz = ['resources', 'testResources']
+				for xnode in xbuild:
+					tag = Pom.Xml.get_clean_tag(xnode)
+					if tag in tags:
+						value = Pom.Xml.get_node_value(xnode, '')
+						if len(value) > 0: 
+							self['project.build.' + tag] = self._expand_item(value)
+					elif tag in tagz:
+						subtag = tag[:-1]
+						xsubnode = Pom.Xml.get_node(xnode, subtag)
+						if xsubnode is None:
+							continue
+						value = Pom.Xml.get_child_node_value(xsubnode, 'directory', '')
+						if len(value) > 0: 
+							self['project.build.{0}.{1}.directory'.format(tag, subtag)] = self._expand_item(value)
+			self._expand_cache = {}
+		
+		def _add_project_properties(self, xroot):
+			self._expand_cache = {}
+			if not hasattr(self, 'internal'):
+				self.internal = set()
+			# SuperPOM (artifact)
+			parent_tag = Pom.Xml.get_clean_tag(xroot)
+			if parent_tag == 'project':
+				artifact = Pom.Artifact.parse(xroot)
+				if artifact is not None:
+					self['project.groupId'] = artifact.get_groupId()
+					self['project.artifactId'] = artifact.artifactId
+					self['project.version'] = artifact.get_version()
+					self.internal.add('project.groupId')
+					self.internal.add('project.artifactId')
+					self.internal.add('project.version')
+				self['project.finalName'] = self._expand_item('${project.artifactId}-${project.version}')
+				self.internal.add('project.finalName')
+			self._expand_cache = {}
+		
+		def get_list(self, internal=False, external=False):
+			properties = {}
+			for k, v in self.items():
+				if not k in self.external and not k in self.internal:
+					properties[k] = v
+			return properties
+		
+		@classmethod
+		def create(cls, xroot, pom_io=None, parent_properties={}):
+			properties = cls()
+			properties.internal = set()
+			properties.external = set()
+			properties._add_build_properties(pom_io, xroot)
+			properties._add_project_properties(xroot)
+			xproperties = Pom.Xml.get_properties(xroot)
+			for xproperty in xproperties:
+				if xproperty.tag is etree.Comment:
+					continue
+				key = Pom.Xml.get_clean_tag(xproperty)
+				value = Pom.Xml.get_node_value(xproperty) 
+				properties[key] = value
+			properties._expand_cache = {}
+			properties._expand_self()
+			properties._expand_with(parent_properties)
+			properties._expand_cache = {}
+			return properties
+	
+	
 	class Artifact():
-		def __init__(self, parent, groupId, artifactId, version, packaging):
+		def __init__(self, parent, groupId, artifactId, packaging, classifier, version):
 			self.parent = parent
 			self.groupId = groupId
 			self.artifactId = artifactId
-			self.version = version
 			self.packaging = packaging
+			self.classifier = classifier
+			self.version = version
 			self.moduleId = self.get_module_id()
+		
+		def get_groupId(self):
+			return self.groupId if len(self.groupId) > 0 else self.parent.groupId
+		
+		def get_version(self):
+			return self.version if len(self.version) > 0 else self.parent.version
 		
 		def match(self, name):
 			module_id = self.get_module_id()
 			if module_id == name:
 				return True
-			module_parts = module_id.split(':')
-			l = len(module_parts)
-			if l == 3:
-				return name == module_parts[1]
-			elif l == 2 or l == 1:
-				return name == module_parts[0]
-			else:
-				return False
+			return name == self.artifactId
 		
-		def get_module_id(self):
-			if len(self.groupId) > 0:
-				moduleId = self.groupId + ':'
-			elif self.parent is not None and len(self.parent.groupId) > 0:
-				moduleId = self.parent.groupId + ':'
-			else:
-				moduleId = ''
-			if len(self.artifactId) > 0:
-				moduleId = moduleId + self.artifactId
-			else:
-				moduleId = moduleId + '__unnamed__'
-			if len(self.version) > 0:
-				moduleId = moduleId + ':' + self.version
-			elif self.parent is not None and len(self.parent.version) > 0:
-				moduleId = moduleId + ':' + self.parent.version
+		def get_module_id(self, full=False):
+			moduleId = self.get_groupId() + ':' + self.artifactId + ':'
+			if full:
+				if len(self.classifier) > 0:
+					moduleId += self.packaging + ':' + self.classifier + ':'
+				elif self.packaging != 'jar':
+					moduleId += self.packaging + ':'
+			moduleId += self.get_version()
 			return moduleId
 		
 		def __eq__(self, other):
@@ -341,7 +525,7 @@ class Pom():
 			return hash(self.get_module_id())
 		
 		def __str__(self):
-			return self.get_module_id()
+			return self.get_module_id(full=True)
 		
 		def __repr__(self):
 			return "Pom.Artifact(%s)" % str(self)
@@ -354,10 +538,21 @@ class Pom():
 			else:
 				parent = None
 			groupId = Pom.Xml.get_group_id(xroot)
-			artifactId = Pom.Xml.get_artifact_id(xroot)
+			if len(groupId) == 0 and (parent is None or len(parent.groupId) == 0):
+				return None
 			version = Pom.Xml.get_version(xroot)
+			if len(version) == 0 and (parent is None or len(parent.version) == 0):
+				return None
+			artifactId = Pom.Xml.get_artifact_id(xroot)
+			if len(artifactId) == 0:
+				return None
 			packaging = Pom.Xml.get_packaging(xroot)
-			return Pom.Artifact(parent, groupId, artifactId, version, packaging)
+			if len(packaging) == 0:
+				packaging = 'jar'
+			if packaging not in ['pom', 'jar', 'maven-plugin', 'ejb', 'war', 'ear', 'rar', 'par', 'rpm']:
+				return None
+			classifier = Pom.Xml.get_classifier(xroot)
+			return Pom.Artifact(parent, groupId, artifactId, packaging, classifier, version)
 	
 	class BuildWeight(object):
 		def __init__(self):
@@ -405,11 +600,12 @@ class Pom():
 			return weight
 	
 	class Module(BuildWeight):
-		def __init__(self, pom_io, artifact, modules, profiles, depth = 0):
+		def __init__(self, pom_io, artifact, properties, modules, profiles, depth = 0):
 			super(self.__class__, self).__init__()
 			self.depth = depth
 			self.io = pom_io
 			self.artifact = artifact
+			self.properties = properties
 			self.modules = modules
 			self.profiles = profiles
 		
@@ -425,7 +621,7 @@ class Pom():
 			Pom.BuildGraph.show(conf)
 		
 		@staticmethod
-		def create(pom_io, depth = 0):
+		def create(pom_io, parent_properties = {}, depth = 0):
 			if not isinstance(pom_io, Pom.IO):
 				pom_io = Pom.IO(pom_io)
 			if not os.path.isfile(pom_io.file_path):
@@ -435,27 +631,30 @@ class Pom():
 			xroot = xtree.getroot()
 			
 			artifact = Pom.Artifact.parse(xroot)
-			modules = Pom.Module.get_modules(pom_io, xroot, depth + 1)
-			profiles = Pom.Profile.get_profiles(pom_io, xroot, depth + 1)
+			if artifact is None:
+				return None
+			properties = Pom.Properties.create(xroot, pom_io=pom_io, parent_properties=parent_properties)
+			modules = Pom.Module.get_modules(pom_io, xroot, properties, depth + 1)
+			profiles = Pom.Profile.get_profiles(pom_io, xroot, properties, depth + 1)
 			
-			return Pom.Module(pom_io, artifact, modules, profiles, depth)
+			return Pom.Module(pom_io, artifact, properties, modules, profiles, depth)
 		
 		@staticmethod
-		def get_modules(pom_io, xroot, depth = 0):
+		def get_modules(pom_io, xroot, parent_properties = {}, depth = 0):
 			modules = {}
 			for xmodule in Pom.Xml.get_modules(xroot):
 				module_name = xmodule.text.strip()
 				if len(module_name) == 0: continue
 				if module_name in modules: continue
-				modules[module_name] = None
+				#modules[module_name] = None
 				if os.path.isdir(os.path.join(pom_io.dir_path, module_name)):
 					pom_file = os.path.join(pom_io.dir_path, module_name, 'pom.xml')
-					pom_module = Pom.Module.create(pom_file, depth)
+					pom_module = Pom.Module.create(pom_file, parent_properties, depth)
 					if pom_module is not None:
 						modules[module_name] = pom_module
 				else:
 					pom_file = os.path.join(pom_io.dir_path, module_name)
-					pom_module = Pom.Module.create(pom_file, depth)
+					pom_module = Pom.Module.create(pom_file, parent_properties, depth)
 					if pom_module is not None:
 						modules[module_name] = pom_module
 			return modules
@@ -467,11 +666,12 @@ class Pom():
 			return "Pom.Module(%s)" % str(self)
 	
 	class Profile(BuildWeight):
-		def __init__(self, pom_io, name, modules, activation, depth = 0):
+		def __init__(self, pom_io, name, properties, modules, activation, depth = 0):
 			super(self.__class__, self).__init__()
 			self.depth = depth
 			self.io = pom_io
 			self.name = name
+			self.properties = properties
 			self.modules = modules
 			self.activation = activation
 		
@@ -483,25 +683,27 @@ class Pom():
 			Pom.BuildGraph.show(conf)
 		
 		@staticmethod
-		def create(pom_io, xprofile, depth = 0):
+		def create(pom_io, xprofile, parent_properties = {}, depth = 0):
 			if not isinstance(pom_io, Pom.IO):
 				pom_io = Pom.IO(pom_io)
 			if not os.path.isfile(pom_io.file_path):
 				return None
 			name = Pom.Xml.get_id(xprofile)
-			modules = Pom.Module.get_modules(pom_io, xprofile, depth + 1)
+			
+			properties = Pom.Properties.create(xprofile, parent_properties=parent_properties)
+			modules = Pom.Module.get_modules(pom_io, xprofile, properties, depth + 1)
 			activation = Pom.Activation.parse(xprofile)
 			
-			return Pom.Profile(pom_io, name, modules, activation, depth)
+			return Pom.Profile(pom_io, name, properties, modules, activation, depth)
 		
 		@staticmethod
-		def get_profiles(pom_io, xroot, depth = 0):
+		def get_profiles(pom_io, xroot, parent_properties = {}, depth = 0):
 			profiles = {}
 			for xprofile in Pom.Xml.get_profiles(xroot):
 				profile_name = Pom.Xml.get_id(xprofile)
 				if len(profile_name) == 0: continue
 				if profile_name in profiles: continue
-				profile = Pom.Profile.create(pom_io, xprofile, depth)
+				profile = Pom.Profile.create(pom_io, xprofile, parent_properties, depth)
 				if profile is None: continue
 				profiles[profile_name] = profile 
 			return profiles
@@ -849,6 +1051,13 @@ class Maven():
 				print "%.4f\t%s" % (pom.get_weight(bp), bp.get_cmdline())
 			else:
 				print "%s" % bp.get_cmdline()
+	
+	def show_dependencies(self, show_tree):
+		pom = Pom.Module.create(self.pom_file)
+		bpm = Pom.BuildPathMap.create(pom)
+		#modules = sorted(bpm.modules, key=lambda item: item.moduleId)
+		#for module in modules:
+		#	print module
 
 class CmdLine():
 	_type_dir = click.Path(exists=True, file_okay=False, dir_okay=True, readable=True, resolve_path=True)
@@ -953,7 +1162,7 @@ class CmdLine():
 		bgc.show_prefix = not hide_prefix
 		bgc.output_tree = tree
 		root.show_graph(bgc, True)
-
+	
 	@cli.command('how-to-build', short_help='how to build')
 	@click.option('--module', '-m', metavar='<module>', multiple=True, help='module to build (multiple)')
 	@click.option('--profile', '-p', metavar='<profile>', multiple=True, help='profile to build (multiple)')
@@ -967,6 +1176,14 @@ class CmdLine():
 		profiles = CmdLine.get_multi_option(profile)
 		excludes = CmdLine.get_multi_option(exclude)
 		mvn.how_to_build(modules, profiles, excludes, show_weight)
+	
+	@cli.command('show-dependencies', short_help='show dependencies')
+	@click.pass_context
+	@click.option('--tree/--list', '-t/-l', default=True, is_flag=True, help='show tree or list')
+	def show_dependencies(ctx, tree):
+		cfg = ctx.ensure_object(Config)
+		mvn = Maven(cfg)
+		mvn.show_dependencies(tree)
 
 if __name__ == '__main__':
 	cmd = CmdLine()
