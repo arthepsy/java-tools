@@ -251,13 +251,16 @@ class Pom():
 			return Pom.Xml.get_nodes(xnode, 'profile', 'profiles')
 		
 		@staticmethod
-		def get_nodes(xnode, children_name, parent_name=None):
+		def get_nodes(xnode, children_name=None, parent_name=None):
 			if parent_name is not None and len(parent_name) > 0:
 				xparent = xnode.find("{*}" + parent_name)
 			else:
 				xparent = xnode
 			if xparent is not None:
-				return xparent.iterchildren("{*}" + children_name)
+				if children_name is None or len(children_name) == 0:
+					return xparent.iterchildren()
+				else:
+					return xparent.iterchildren("{*}" + children_name)
 			else:
 				return []
 		
@@ -267,15 +270,22 @@ class Pom():
 		
 		@staticmethod
 		def get_node_value(xnode, default_value = None):
-			value = xnode.text.strip() if xnode is not None else ''
+			if xnode is not None and xnode.text is not None:
+				value = xnode.text.strip()
+			else:
+				value = ''
 			if len(value) == 0 and default_value is not None:
-				groupid = default_value
+				value = default_value
 			return value
 		
 		@staticmethod
 		def get_child_node_value(xnode, child_name, default_value = None):
 			xnode = Pom.Xml.get_node(xnode, child_name)
 			return Pom.Xml.get_node_value(xnode, default_value)
+		
+		@staticmethod
+		def get_clean_tag(xnode):
+			return re.sub('^({[^{]*})?[ \t]*(.*)$', '\\2', xnode.tag.strip())
 	
 	class IO():
 		def __init__(self, pom_file):
