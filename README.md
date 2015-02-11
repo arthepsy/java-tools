@@ -18,3 +18,6 @@ Java tools (e.g, jdk &amp; maven environment)
   ./java.class_name.sh misc.class
   misc.class: com.example.code.Domain$Trait$FieldHelper
   ```
+
+* `ar.mvn.py` -- Maven project analyzer  
+
