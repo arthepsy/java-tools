@@ -258,6 +258,18 @@ class Pom():
 			return Pom.Xml.get_nodes(xnode, parent_name = 'properties')
 		
 		@staticmethod
+		def get_dependencies(xnode, management=False):
+			if management:
+				xnode = Pom.Xml.get_node(xnode, 'dependencyManagement')
+			if xnode is None:
+				return []
+			return Pom.Xml.get_nodes(xnode, 'dependency', 'dependencies')
+		
+		@staticmethod
+		def get_plugins(xnode):
+			return Pom.Xml.get_nodes(xnode, 'plugin', 'plugins')
+		
+		@staticmethod
 		def get_nodes(xnode, children_name=None, parent_name=None):
 			if parent_name is not None and len(parent_name) > 0:
 				xparent = xnode.find("{*}" + parent_name)
@@ -306,35 +318,37 @@ class Pom():
 				for key in list(keys):
 					if key in ignore_list:
 						keys.remove(key)
+			#keys.remove('')
 			return keys
 			
-		def expand_required(self, item_value = None, ignore_list = None):
-			if item_value is not None:
+		def expand_required(self, value = None, ignore_list = None):
+			if value is not None:
 				if ignore_list is None:
-					return item_value.find('${') != -1
+					return value.find('${') != -1
 				else:
-					keys = self._get_item_keys(item_value, ignore_list)
+					keys = self._get_item_keys(value, ignore_list)
 					return not len(keys) == 0
 			for value in self.values():
 				if self.expand_required(value, ignore_list):
 					return True
 			return False
 		
-		def expand_item(self, item_key):
+		def expand_item(self, key=None, value=None):
 			self._expand_cache = {}
-			value = self._expand_item(item_key)
+			value = self._expand_item(key, value)
 			self._expand_cache = {}
 			return value
 		
-		def _expand_item(self, item_key):
+		def _expand_item(self, key=None, value=None):
+			if key is None and value is None: 
+				return '' 
 			stack = []
-			stack.append(item_key)
+			stack.append(key)
 			irreplaceable = set()
 			get_value = lambda k: self._expand_cache.get(k, self.get(k, None))
-			orig_key = item_key
 			while True:
 				item_key = stack.pop()
-				item_value = get_value(item_key)
+				item_value = value if item_key is None else get_value(item_key)
 				if item_value is not None:
 					if self.expand_required(item_value):
 						replace_keys = self._get_item_keys(item_value)
@@ -354,15 +368,16 @@ class Pom():
 							stack.append(item_key)
 							for replace_key in replace_keys:
 								stack.append(replace_key)
-				self._expand_cache[item_key] = item_value
+				if item_key is not None:
+					self._expand_cache[item_key] = item_value
 				if len(stack) == 0:
 					break
-			return orig_key if item_value is None else item_value
+			return next((item for item in [item_value, key, value] if item is not None), '')
 		
-		def expand_self(self):
-			self._expand_cache = {}
-			self._expand_self()
-			self._expand_cache = {}
+		#def expand_self(self):
+		#	self._expand_cache = {}
+		#	self._expand_self()
+		#	self._expand_cache = {}
 		
 		def _expand_self(self):
 			if not self.expand_required():
@@ -455,6 +470,16 @@ class Pom():
 				self.internal.add('project.finalName')
 			self._expand_cache = {}
 		
+		def _add_session_properties(self, pom_io, parent_properties):
+			self._expand_cache = {}
+			key = 'session.executionRootDirectory'
+			if key in parent_properties:
+				self['session.executionRootDirectory'] = parent_properties[key]
+			else:
+				self['session.executionRootDirectory'] = pom_io.dir_path
+			self.internal.add('session.executionRootDirectory')
+			self._expand_cache = {}
+		
 		def get_list(self, internal=False, external=False):
 			properties = {}
 			for k, v in self.items():
@@ -469,6 +494,7 @@ class Pom():
 			properties.external = set()
 			properties._add_build_properties(pom_io, xroot)
 			properties._add_project_properties(xroot)
+			properties._add_session_properties(pom_io, parent_properties)
 			xproperties = Pom.Xml.get_properties(xroot)
 			for xproperty in xproperties:
 				if xproperty.tag is etree.Comment:
@@ -531,19 +557,22 @@ class Pom():
 			return "Pom.Artifact(%s)" % str(self)
 		
 		@staticmethod
-		def parse(xroot):
+		def parse(xroot, properties=None):
+			if properties is None:
+				properties = Pom.Properties()
 			xparent = Pom.Xml.get_node(xroot, 'parent')
 			if xparent is not None:
 				parent = Pom.Artifact.parse(xparent)
 			else:
 				parent = None
-			groupId = Pom.Xml.get_group_id(xroot)
+			expand = lambda v: properties.expand_item(value=v) if properties.expand_required(v) else v
+			groupId = expand(Pom.Xml.get_group_id(xroot))
 			if len(groupId) == 0 and (parent is None or len(parent.groupId) == 0):
 				return None
-			version = Pom.Xml.get_version(xroot)
+			version = expand(Pom.Xml.get_version(xroot))
 			if len(version) == 0 and (parent is None or len(parent.version) == 0):
 				return None
-			artifactId = Pom.Xml.get_artifact_id(xroot)
+			artifactId =expand(Pom.Xml.get_artifact_id(xroot))
 			if len(artifactId) == 0:
 				return None
 			packaging = Pom.Xml.get_packaging(xroot)
@@ -551,8 +580,30 @@ class Pom():
 				packaging = 'jar'
 			if packaging not in ['pom', 'jar', 'maven-plugin', 'ejb', 'war', 'ear', 'rar', 'par', 'rpm']:
 				return None
-			classifier = Pom.Xml.get_classifier(xroot)
+			classifier = expand(Pom.Xml.get_classifier(xroot))
 			return Pom.Artifact(parent, groupId, artifactId, packaging, classifier, version)
+	
+	class Dependencies(dict):
+		@staticmethod
+		def create(xroot, properties = {}):
+			dependencies = Pom.Dependencies()
+			for xdependency in Pom.Xml.get_dependencies(xroot, True):
+				dependency = Pom.Dependency.parse(xdependency, properties)
+				#print dependency
+				
+			for xdependency in Pom.Xml.get_dependencies(xroot, False):
+				dependency = Pom.Dependency.parse(xdependency, properties)
+				#print dependency
+			return dependencies
+	
+	class Dependency:
+		def __init__(self):
+			pass
+		
+		@staticmethod
+		def parse(xnode, properties = {}):
+			artifact = Pom.Artifact.parse(xnode, properties)
+			# print xnode, artifact
 	
 	class BuildWeight(object):
 		def __init__(self):
@@ -634,6 +685,7 @@ class Pom():
 			if artifact is None:
 				return None
 			properties = Pom.Properties.create(xroot, pom_io=pom_io, parent_properties=parent_properties)
+			dependencies = Pom.Dependencies.create(xroot, properties)
 			modules = Pom.Module.get_modules(pom_io, xroot, properties, depth + 1)
 			profiles = Pom.Profile.get_profiles(pom_io, xroot, properties, depth + 1)
 			
