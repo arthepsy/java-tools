@@ -458,7 +458,7 @@ class Pom():
 			# SuperPOM (artifact)
 			parent_tag = Pom.Xml.get_clean_tag(xroot)
 			if parent_tag == 'project':
-				artifact = Pom.Artifact.parse(xroot)
+				artifact = Pom.Artifact.parse(xroot, Pom.ArtifactOrigin.PROJECT)
 				if artifact is not None:
 					self['project.groupId'] = artifact.get_groupId()
 					self['project.artifactId'] = artifact.artifactId
@@ -509,8 +509,22 @@ class Pom():
 			return properties
 	
 	
+	class ArtifactOrigin():
+		UNKNOWN = 0
+		PROJECT = 1
+		DEPENDENCY = 2
+		
+		@staticmethod
+		def ensure(value):
+			if 0 < value > 2:
+				return Pom.ArtifactOrigin.UNKNOWN
+			else:
+				return value
+
+	
 	class Artifact():
-		def __init__(self, parent, groupId, artifactId, packaging, classifier, version):
+		def __init__(self, origin, parent, groupId, artifactId, packaging, classifier, version):
+			self.origin = Pom.ArtifactOrigin.ensure(origin)
 			self.parent = parent
 			self.groupId = groupId
 			self.artifactId = artifactId
@@ -525,11 +539,43 @@ class Pom():
 		def get_version(self):
 			return self.version if len(self.version) > 0 else self.parent.version
 		
-		def match(self, name):
-			module_id = self.get_module_id()
-			if module_id == name:
-				return True
-			return name == self.artifactId
+		@staticmethod
+		def get_parts(module_name):
+			p = self.module_name.split(':')
+			l = len(p)
+			clean = lambda v: None if v == '*' else v.strip()
+			if l == 1:
+				return {'artifactId': clean([0])}
+			if 3 < l > 5:
+				return {}
+			if l >= 3:
+				parts = {'groupId': clean(p[0]), 'artifactId': clean(p[1])}
+			if l == 3:
+				parts['version'] = clean(p[2])
+			elif l == 4:
+				parts['packaging'] = clean(p[2])
+				parts['version'] = clean(p[3])
+			elif l == 5:
+				parts['packaging'] = clean(p[2])
+				parts['classifier'] = clean(p[3])
+				parts['version'] = clean(p[4])
+			return parts
+			
+		def match(self, groupId=None, artifactId=None, packaging=None, classifier=None, version=None):
+			if groupId is not None and self.get_groupId() != groupId: return False
+			if artifactId is not None and self.artifactId != artifactId: return False
+			if packaging is not None and self.packaging != packaging: return False
+			if classifier is not None and self.classifier != classifier: return False
+			if version is not None and self.get_version() != version: return False
+			return True
+		
+		def match_name(self, name):
+			parts = Pom.Artifact.get_parts(full_name)
+			return self.match(parts.get('groupId'),
+			                  parts.get('artifactId'),
+			                  parts.get('packaging'),
+			                  parts.get('classifier'),
+			                  parts.get('version'))
 		
 		def get_module_id(self, full=False):
 			moduleId = self.get_groupId() + ':' + self.artifactId + ':'
@@ -557,53 +603,118 @@ class Pom():
 			return "Pom.Artifact(%s)" % str(self)
 		
 		@staticmethod
-		def parse(xroot, properties=None):
-			if properties is None:
-				properties = Pom.Properties()
-			xparent = Pom.Xml.get_node(xroot, 'parent')
-			if xparent is not None:
-				parent = Pom.Artifact.parse(xparent)
-			else:
-				parent = None
-			expand = lambda v: properties.expand_item(value=v) if properties.expand_required(v) else v
-			groupId = expand(Pom.Xml.get_group_id(xroot))
-			if len(groupId) == 0 and (parent is None or len(parent.groupId) == 0):
-				return None
-			version = expand(Pom.Xml.get_version(xroot))
-			if len(version) == 0 and (parent is None or len(parent.version) == 0):
-				return None
-			artifactId =expand(Pom.Xml.get_artifact_id(xroot))
+		def parse(xroot, origin=0, inheritance=None):
+			origin = Pom.ArtifactOrigin.ensure(origin)
+			inheritance = Pom.Inheritance.ensure(inheritance)
+			
+			parent = None
+			parent_tag = Pom.Xml.get_clean_tag(xroot)
+			if parent_tag == 'project' or origin == Pom.ArtifactOrigin.PROJECT:
+				xparent = Pom.Xml.get_node(xroot, 'parent')
+				if xparent is not None:
+					parent = Pom.Artifact.parse(xparent, origin)
+			expand = lambda v: inheritance.properties.expand_item(value=v) if inheritance.properties.expand_required(v) else v
+			artifactId = expand(Pom.Xml.get_artifact_id(xroot))
 			if len(artifactId) == 0:
 				return None
-			packaging = Pom.Xml.get_packaging(xroot)
-			if len(packaging) == 0:
-				packaging = 'jar'
-			if packaging not in ['pom', 'jar', 'maven-plugin', 'ejb', 'war', 'ear', 'rar', 'par', 'rpm']:
-				return None
+			groupId = expand(Pom.Xml.get_group_id(xroot))
+			version = expand(Pom.Xml.get_version(xroot))
+			if len(groupId) == 0 and (parent is None or len(parent.groupId) == 0):
+				if len(version) == 0 and (parent is None or len(parent.version) == 0):
+					return None
+				if origin != Pom.ArtifactOrigin.DEPENDENCY:
+					return None
+				found = None
+				mx_version = version or parent.version
+				for dependency in inheritance.dependencies.get_managed().values():
+					if dependency.artifact.match(artifactId=artifactId, version=mx_version):
+						found = dependency
+				if found is None:
+					return None
+				groupId = found.artifact.groupId
+			if len(version) == 0 and (parent is None or len(parent.version) == 0):
+				if origin != Pom.ArtifactOrigin.DEPENDENCY:
+					return None
+				found = None
+				mx_groupId = groupId or parent.groupId
+				for dependency in inheritance.dependencies.get_managed().values():
+					if dependency.artifact.match(groupId=mx_groupId, artifactId=artifactId):
+						found = dependency
+				if found is None:
+					return None
+				version = found.artifact.version
+			if origin == Pom.ArtifactOrigin.DEPENDENCY:
+				packaging = ''
+			else:
+				packaging = Pom.Xml.get_packaging(xroot)
+				if len(packaging) == 0:
+					packaging = 'jar'
+				if packaging not in ['pom', 'jar', 'maven-plugin', 'ejb', 'war', 'ear', 'rar', 'par', 'rpm']:
+					return None
 			classifier = expand(Pom.Xml.get_classifier(xroot))
-			return Pom.Artifact(parent, groupId, artifactId, packaging, classifier, version)
+			return Pom.Artifact(origin, parent, groupId, artifactId, packaging, classifier, version)
 	
 	class Dependencies(dict):
+		def __init__(self, *args, **kwargs ):
+			dict.__init__(self, *args, **kwargs)
+			self.managed = set()
+		
+		def get_managed(self):
+			return {k: v for k, v in self.items() if k in self.managed}
+		
 		@staticmethod
-		def create(xroot, properties = {}):
+		def create(xroot, inheritance = None):
+			inheritance = Pom.Inheritance.ensure(inheritance)
 			dependencies = Pom.Dependencies()
+			
+			for dependency in inheritance.dependencies.get_managed().values():
+				dependencies[dependency.artifact] = dependency
+				dependencies.managed.add(dependency.artifact)
+			
 			for xdependency in Pom.Xml.get_dependencies(xroot, True):
-				dependency = Pom.Dependency.parse(xdependency, properties)
-				#print dependency
-				
+				dependency = Pom.Dependency.parse(xdependency, inheritance)
+				if dependency is None: continue
+				dependencies[dependency.artifact] = dependency
+				dependencies.managed.add(dependency.artifact)
+			
 			for xdependency in Pom.Xml.get_dependencies(xroot, False):
-				dependency = Pom.Dependency.parse(xdependency, properties)
-				#print dependency
+				dependency = Pom.Dependency.parse(xdependency, inheritance)
+				if dependency is None: continue
+				dependencies[dependency.artifact] = dependency
+			
 			return dependencies
 	
 	class Dependency:
-		def __init__(self):
-			pass
+		def __init__(self, artifact, deptype, scope, systemPath, optional):
+			self.artifact = artifact
+			self.deptype = deptype
+			self.scope = scope
+			self.systemPath = systemPath
+			self.optional = optional
 		
 		@staticmethod
-		def parse(xnode, properties = {}):
-			artifact = Pom.Artifact.parse(xnode, properties)
-			# print xnode, artifact
+		def parse(xnode, inheritance = None):
+			inheritance = Pom.Inheritance.ensure(inheritance)
+			artifact = Pom.Artifact.parse(xnode, Pom.ArtifactOrigin.DEPENDENCY, inheritance)
+			if artifact is None:
+				return None
+			deptype = Pom.Xml.get_child_node_value(xnode, 'type', '')
+			scope = Pom.Xml.get_child_node_value(xnode, 'scope', 'compile')
+			if scope not in ['compile', 'provided', 'runtime', 'test', 'system']:
+				return None
+			if scope == 'system':
+				systemPath = Pom.Xml.get_child_node_value(xnode, 'systemPath', '')
+			else:
+				systemPath = ''
+			optional = Pom.Xml.get_child_node_value(xnode, 'optional', 'false').lower() == 'true'
+			dependency = Pom.Dependency(artifact, deptype, scope, systemPath, optional)
+			return dependency
+		
+		def __repr__(self):
+			rest = [self.deptype, 'optional' if self.optional else '']
+			rest = ', '.join([i for i in rest if len(i) > 0])
+			if len(rest) > 0: rest = ', ' + rest
+			return "Pom.Dependency(%s, %s%s)" % (self.scope, self.artifact, rest)
 	
 	class BuildWeight(object):
 		def __init__(self):
@@ -650,13 +761,38 @@ class Pom():
 				pass
 			return weight
 	
+	class Inheritance(object):
+		def __init__(self, properties=None, dependencies=None):
+			self.properties = properties or Pom.Properties()
+			self.dependencies = dependencies or Pom.Dependencies()
+		
+		@staticmethod
+		def ensure(value):
+			if value is None:
+				return Pom.Inheritance()
+			elif isinstance(value, Pom.Inheritance):
+				return value
+			elif isinstance(value, Pom.Properties):
+				return Pom.Inheritance(properties = value)
+			elif isinstance(value, Pom.Dependencies):
+				return Pom.Inheritance(dependencies = value)
+			else:
+				return Pom.Inheritance()
+		
+		def __repr__(self):
+			props = {'properties': len(self.properties), 'dependencies': len(self.dependencies)}
+			props = {k: v for k, v in props.items() if v > 0}
+			value = ', '.join(['%s: %d' % (k, v) for (k, v) in props.items()])
+			return "Pom.Inheritance(%s)" % value
+	
 	class Module(BuildWeight):
-		def __init__(self, pom_io, artifact, properties, modules, profiles, depth = 0):
+		def __init__(self, pom_io, artifact, properties, dependencies, modules, profiles, depth = 0):
 			super(self.__class__, self).__init__()
 			self.depth = depth
 			self.io = pom_io
 			self.artifact = artifact
 			self.properties = properties
+			self.dependencies = dependencies
 			self.modules = modules
 			self.profiles = profiles
 		
@@ -672,27 +808,33 @@ class Pom():
 			Pom.BuildGraph.show(conf)
 		
 		@staticmethod
-		def create(pom_io, parent_properties = {}, depth = 0):
+		def create(pom_io, inheritance = None, depth = 0):
 			if not isinstance(pom_io, Pom.IO):
 				pom_io = Pom.IO(pom_io)
 			if not os.path.isfile(pom_io.file_path):
 				return None
+			inheritance = Pom.Inheritance.ensure(inheritance)
+			
 			parser = etree.XMLParser(recover=True)
 			xtree = etree.parse(pom_io.file_path, parser)
 			xroot = xtree.getroot()
 			
-			artifact = Pom.Artifact.parse(xroot)
+			artifact = Pom.Artifact.parse(xroot, Pom.ArtifactOrigin.PROJECT)
 			if artifact is None:
 				return None
-			properties = Pom.Properties.create(xroot, pom_io=pom_io, parent_properties=parent_properties)
-			dependencies = Pom.Dependencies.create(xroot, properties)
-			modules = Pom.Module.get_modules(pom_io, xroot, properties, depth + 1)
-			profiles = Pom.Profile.get_profiles(pom_io, xroot, properties, depth + 1)
+			properties = Pom.Properties.create(xroot, pom_io=pom_io, parent_properties=inheritance.properties)
+			inheritance = Pom.Inheritance(properties=properties, dependencies = inheritance.dependencies)
+			dependencies = Pom.Dependencies.create(xroot, inheritance)
+			inheritance.dependencies = dependencies
 			
-			return Pom.Module(pom_io, artifact, properties, modules, profiles, depth)
+			modules = Pom.Module.get_modules(pom_io, xroot, inheritance, depth + 1)
+			profiles = Pom.Profile.get_profiles(pom_io, xroot, inheritance, depth + 1)
+			
+			return Pom.Module(pom_io, artifact, properties, dependencies, modules, profiles, depth)
 		
 		@staticmethod
-		def get_modules(pom_io, xroot, parent_properties = {}, depth = 0):
+		def get_modules(pom_io, xroot, inheritance = None, depth = 0):
+			inheritance = Pom.Inheritance.ensure(inheritance)
 			modules = {}
 			for xmodule in Pom.Xml.get_modules(xroot):
 				module_name = xmodule.text.strip()
@@ -701,12 +843,12 @@ class Pom():
 				#modules[module_name] = None
 				if os.path.isdir(os.path.join(pom_io.dir_path, module_name)):
 					pom_file = os.path.join(pom_io.dir_path, module_name, 'pom.xml')
-					pom_module = Pom.Module.create(pom_file, parent_properties, depth)
+					pom_module = Pom.Module.create(pom_file, inheritance, depth)
 					if pom_module is not None:
 						modules[module_name] = pom_module
 				else:
 					pom_file = os.path.join(pom_io.dir_path, module_name)
-					pom_module = Pom.Module.create(pom_file, parent_properties, depth)
+					pom_module = Pom.Module.create(pom_file, inheritance, depth)
 					if pom_module is not None:
 						modules[module_name] = pom_module
 			return modules
@@ -735,27 +877,29 @@ class Pom():
 			Pom.BuildGraph.show(conf)
 		
 		@staticmethod
-		def create(pom_io, xprofile, parent_properties = {}, depth = 0):
+		def create(pom_io, xprofile, inheritance = None, depth = 0):
 			if not isinstance(pom_io, Pom.IO):
 				pom_io = Pom.IO(pom_io)
 			if not os.path.isfile(pom_io.file_path):
 				return None
+			inheritance = Pom.Inheritance.ensure(inheritance)
 			name = Pom.Xml.get_id(xprofile)
 			
-			properties = Pom.Properties.create(xprofile, parent_properties=parent_properties)
-			modules = Pom.Module.get_modules(pom_io, xprofile, properties, depth + 1)
+			properties = Pom.Properties.create(xprofile, parent_properties=inheritance.properties)
+			modules = Pom.Module.get_modules(pom_io, xprofile, inheritance, depth + 1)
 			activation = Pom.Activation.parse(xprofile)
 			
 			return Pom.Profile(pom_io, name, properties, modules, activation, depth)
 		
 		@staticmethod
-		def get_profiles(pom_io, xroot, parent_properties = {}, depth = 0):
+		def get_profiles(pom_io, xroot, inheritance = None, depth = 0):
+			inheritance = Pom.Inheritance.ensure(inheritance)
 			profiles = {}
 			for xprofile in Pom.Xml.get_profiles(xroot):
 				profile_name = Pom.Xml.get_id(xprofile)
 				if len(profile_name) == 0: continue
 				if profile_name in profiles: continue
-				profile = Pom.Profile.create(pom_io, xprofile, parent_properties, depth)
+				profile = Pom.Profile.create(pom_io, xprofile, inheritance, depth)
 				if profile is None: continue
 				profiles[profile_name] = profile 
 			return profiles
@@ -921,7 +1065,7 @@ class Pom():
 		def _find_module_key(self, module_name):
 			found = []
 			for artifact in self.modules:
-				if artifact.match(module_name):
+				if artifact.match_name(module_name):
 					found.append(artifact)
 			l = len(found)
 			if l > 1:
