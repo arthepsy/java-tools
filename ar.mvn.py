@@ -616,32 +616,32 @@ class Pom():
 			expand = lambda v: inheritance.properties.expand_item(value=v) if inheritance.properties.expand_required(v) else v
 			artifactId = expand(Pom.Xml.get_artifact_id(xroot))
 			if len(artifactId) == 0:
-				return None
+				raise Exception("artifactId not defined")
 			groupId = expand(Pom.Xml.get_group_id(xroot))
 			version = expand(Pom.Xml.get_version(xroot))
 			if len(groupId) == 0 and (parent is None or len(parent.groupId) == 0):
 				if len(version) == 0 and (parent is None or len(parent.version) == 0):
-					return None
+					raise Exception("groupId and version not defined for artifact (%s)" % (artifactId))
 				if origin != Pom.ArtifactOrigin.DEPENDENCY:
-					return None
+					raise Exception("groupId not defined for artifact (%s::%s)" % (artifactId, version))
 				found = None
 				mx_version = version or parent.version
 				for dependency in inheritance.dependencies.get_managed().values():
 					if dependency.artifact.match(artifactId=artifactId, version=mx_version):
 						found = dependency
 				if found is None:
-					return None
+					raise Exception("groupId not defined for dependency (%s::%s)" % (artifactId, version))
 				groupId = found.artifact.groupId
 			if len(version) == 0 and (parent is None or len(parent.version) == 0):
 				if origin != Pom.ArtifactOrigin.DEPENDENCY:
-					return None
+					raise Exception("version not defined for artifact (%s:%s)" % (groupId, artifactId))
 				found = None
 				mx_groupId = groupId or parent.groupId
 				for dependency in inheritance.dependencies.get_managed().values():
 					if dependency.artifact.match(groupId=mx_groupId, artifactId=artifactId):
 						found = dependency
 				if found is None:
-					return None
+					raise Exception("version not defined for dependency (%s:%s)" % (groupId, artifactId))
 				version = found.artifact.version
 			if origin == Pom.ArtifactOrigin.DEPENDENCY:
 				packaging = ''
@@ -650,7 +650,7 @@ class Pom():
 				if len(packaging) == 0:
 					packaging = 'jar'
 				if packaging not in ['pom', 'jar', 'maven-plugin', 'ejb', 'war', 'ear', 'rar', 'par', 'rpm']:
-					return None
+					raise Exception("invalid packaging (%s) for artifact (%s:%s:%s)" % (packaging, groupId, artifactId, version))
 			classifier = expand(Pom.Xml.get_classifier(xroot))
 			return Pom.Artifact(origin, parent, groupId, artifactId, packaging, classifier, version)
 	
@@ -672,14 +672,20 @@ class Pom():
 				dependencies.managed.add(dependency.artifact)
 			
 			for xdependency in Pom.Xml.get_dependencies(xroot, True):
-				dependency = Pom.Dependency.parse(xdependency, inheritance)
-				if dependency is None: continue
+				try:
+					dependency = Pom.Dependency.parse(xdependency, inheritance)
+				except Exception as e:
+					print "err: " + e.message
+					continue
 				dependencies[dependency.artifact] = dependency
 				dependencies.managed.add(dependency.artifact)
 			
 			for xdependency in Pom.Xml.get_dependencies(xroot, False):
-				dependency = Pom.Dependency.parse(xdependency, inheritance)
-				if dependency is None: continue
+				try:
+					dependency = Pom.Dependency.parse(xdependency, inheritance)
+				except Exception as e:
+					print "[error] " + e.message
+					continue
 				dependencies[dependency.artifact] = dependency
 			
 			return dependencies
@@ -696,18 +702,17 @@ class Pom():
 		def parse(xnode, inheritance = None):
 			inheritance = Pom.Inheritance.ensure(inheritance)
 			artifact = Pom.Artifact.parse(xnode, Pom.ArtifactOrigin.DEPENDENCY, inheritance)
-			if artifact is None:
-				return None
 			deptype = Pom.Xml.get_child_node_value(xnode, 'type', '')
 			scope = Pom.Xml.get_child_node_value(xnode, 'scope', 'compile')
 			if scope not in ['compile', 'provided', 'runtime', 'test', 'system']:
-				return None
+				raise Exception('invalid scope (%s) for dependency %s' % (scope, artifact)) 
 			if scope == 'system':
 				systemPath = Pom.Xml.get_child_node_value(xnode, 'systemPath', '')
 			else:
 				systemPath = ''
 			optional = Pom.Xml.get_child_node_value(xnode, 'optional', 'false').lower() == 'true'
 			dependency = Pom.Dependency(artifact, deptype, scope, systemPath, optional)
+			# print dependency
 			return dependency
 		
 		def __repr__(self):
@@ -814,7 +819,7 @@ class Pom():
 			if not os.path.isfile(pom_io.file_path):
 				return None
 			inheritance = Pom.Inheritance.ensure(inheritance)
-			
+			# print pom_io.file_path
 			parser = etree.XMLParser(recover=True)
 			xtree = etree.parse(pom_io.file_path, parser)
 			xroot = xtree.getroot()
