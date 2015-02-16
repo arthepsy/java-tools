@@ -537,6 +537,106 @@ class Pom():
 			else:
 				return value
 	
+	class ArtifactVersion():
+		def __init__(self, version):
+			self.major = None
+			self.minor = None
+			self.incremental = None
+			self.build_number = None
+			self.qualifier = None
+			self._parse(version)
+		
+		def get_major(self):
+			return self.major or 0
+		
+		def get_minor(self):
+			return self.minor or 0
+		
+		def get_incremental(self):
+			return self.incremental or 0
+		
+		def get_build_number(self):
+			return self.build_number or 0
+		
+		def get_qualifier(self):
+			return self.qualifier
+		
+		def _get_int(self, value):
+			int_value = int(value)
+			if int_value > 2147483647 or int_value < -2147483648:
+				raise ValueError('32bit integer overflow')
+			return int_value
+		
+		def _get_token_int(self, tokens):
+			try:
+				value = tokens.pop(0)
+			except IndexError:
+				raise ValueError('Number is invalid: "{0}"'.format(value))
+			if len(value) > 1 and value.startswith('0'):
+				raise ValueError('Number part has a leading 0: "{0}"'.format(value))
+			return self._get_int(value)
+		
+		def _parse(self, version):
+			idx = version.find('-')
+			p1 = '';
+			p2 = None
+			if idx < 0:
+				p1 = version
+			else:
+				p1 = version[0:idx]
+				p2 = version[idx+1:]
+			if p2 is not None:
+				try:
+					if len(p2) == 1 or not p2.startswith('0'):
+						self.build_number = self._get_int(p2) 
+					else:
+						self.qualifier = p2
+				except ValueError:
+					self.qualifier = p2
+			if p1.find('.') < 0 and not p1.startswith('0'):
+				try:
+					self.major = self._get_int(p1)
+				except ValueError:
+					self.qualifier = version
+					self.build_number = None
+			else:
+				fallback =  p1.find('..') >= 0 or p1.startswith('.') or p1.endswith('.')
+				if not fallback:
+					tokens = p1.split('.')
+					try:
+						self.major = self._get_token_int(tokens)
+						if tokens:
+							self.minor = self._get_token_int(tokens)
+						if tokens:
+							self.incremental = self._get_token_int(tokens)
+						if tokens:
+							self.qualifier = tokens.pop(0)
+							fallback = self.qualifier.isdigit()
+					except ValueError:
+						fallback = True
+				if fallback:
+					self.qualifier = version
+					self.major = None
+					self.minor = None
+					self.incremental = None
+					self.build_number = None
+		
+		def __str__(self):
+			buf = ''
+			if self.major:
+				buf += str(self.major)
+			if self.minor:
+				buf += '.' + str(self.minor)
+			if self.incremental:
+				buf += '.' + str(self.incremental)
+			if self.build_number:
+				buf += '-' + str(self.build_number)
+			elif self.qualifier:
+				if len(buf) > 0:
+					buf += '-'
+				buf += self.qualifier
+			return buf
+	
 	class Artifact():
 		def __init__(self, origin, parent, groupId, artifactId, packaging, classifier, version):
 			self.origin = Pom.ArtifactOrigin.ensure(origin)
