@@ -563,7 +563,10 @@ class Pom():
 			return self.qualifier
 		
 		def compare_to(self, other):
-			return isinstance(other, self.__class__) and self.comparer.compare_to(other.comparer)
+			if isinstance(other, self.__class__):
+				return self.comparer.compare_to(other.comparer)
+			else:
+				return self.compare_to(Pom.ArtifactVersion(str(other)))
 		
 		def _get_int(self, value):
 			int_value = int(value)
@@ -853,6 +856,300 @@ class Pom():
 						buf += '-' if isinstance(item, self.__class__) else '.'
 					buf += str(item)
 				return buf
+	
+	class ArtifactVersionRange(object):
+		def __init__(self, recommended_version, restrictions):
+			self.recommended_version = recommended_version
+			self.restrictions = restrictions
+		
+		def selected_version(self):
+			if self.recommended_version is not None:
+				return self.recommended_version
+			else:
+				if len(self.restrictions) == 0:
+					raise Pom.ArtifactVersionException('The artifact has no valid ranges')
+			return None
+			
+		def is_selected_version_known(self):
+			if self.recommended_version is not None:
+				return True
+			else:
+				if len(self.restrictions) == 0:
+					raise Pom.ArtifactVersionException('The artifact has no valid ranges')
+			return False
+		
+		def contains_version(self, version):
+			for restriction in self.restrictions:
+				if restriction.contains_version(version):
+					return True
+			return False
+		
+		def restrict(self, other):
+			# TODO: read (iterate), not modify (pop).
+			r1 = self.restrictions
+			r2 = other.restrictions
+			if (r1 is None or len(r1) == 0) or (r2 is None or len(r2) == 0):
+				restrictions = []
+			else:
+				restrictions = self.intersection(r1, r2)
+			version = None
+			if len(restrictions) > 0:
+				for r in self.restrictions:
+					if self.recommended_version is not None and r.contains_version(self.recommended_version):
+						version = self.recommended_version
+						break
+					elif version is None and other.recommended_version is not None and r.contains_version(other.recommended_version):
+						version = other.recommended_version
+			elif self.recommended_version is not None:
+				version = self.recommended_version
+			elif other.recommended_version is not None:
+				version = other.recommended_version
+			return Pom.ArtifactVersionRange(version, restrictions)
+		
+		def intersection(self, r1, r2):
+			restrictions = []
+			i1 = iter(r1)
+			i2 = iter(r2)
+			res1 = i1.next()
+			res2 = i2.next()
+			
+			done = False
+			while not done:
+				if res1.lower_bound is None or res2.upper_bound is None or res1.lower_bound.compare_to(res2.upper_bound) <= 0:
+					if res1.upper_bound is None or res2.lower_bound is None or res1.upper_bound.compare_to(res2.lower_bound) >= 0:
+						if res1.lower_bound is None:
+							lower = res2.lower_bound
+							lower_inclusive = res2.lower_inclusive
+						elif res2.lower_bound is None:
+							lower = res1.lower_bound
+							lower_inclusive = res1.lower_inclusive
+						else:
+							cmp_res = res1.lower_bound.compare_to(res2.lower_bound)
+							if cmp_res < 0:
+								lower = res2.lower_bound
+								lower_inclusive = res2.lower_inclusive
+							elif cmp_res == 0:
+								lower = res1.lower_bound
+								lower_inclusive = res1.lower_inclusive and res2.lower_inclusive
+							else:
+								lower = res1.lower_bound
+								lower_inclusive = res1.lower_inclusive
+						if res1.upper_bound is None:
+							upper = res2.upper_bound
+							upper_inclusive = res2.upper_inclusive
+						elif res2.upper_bound is None:
+							upper = res1.upper_bound
+							upper_inclusive = res1.upper_inclusive
+						else:
+							cmp_res = res1.upper_bound.compare_to(res2.upper_bound)
+							if cmp_res < 0:
+								upper = res1.upper_bound
+								upper_inclusive = res1.upper_inclusive
+							elif cmp_res == 0:
+								upper = res1.upper_bound
+								upper_inclusive = res1.upper_inclusive and res2.upper_inclusive
+							else:
+								upper = res2.upper_bound
+								upper_inclusive = res2.upper_inclusive
+						# do not add if they are equal and one is not inclusive
+						if lower is None or upper is None or lower.compare_to(upper) != 0:
+							restrictions.append(Pom.ArtifactVersionRestriction(lower, lower_inclusive, upper, upper_inclusive))
+						elif lower_inclusive and upper_inclusive:
+							restrictions.append(Pom.ArtifactVersionRestriction(lower, lower_inclusive, upper, upper_inclusive))
+						
+						# no-inspection object equality
+						if upper == res2.upper_bound:
+							try:
+								res2 = i2.next()
+							except StopIteration:
+								done = True
+						else:
+							try:
+								res1 = i1.next()
+							except StopIteration:
+								done = True
+					else:
+						try:
+							res1 = i1.next()
+						except StopIteration:
+							done = True
+				else:
+					try:
+						res2 = i2.next()
+					except StopIteration:
+						done = True
+			return restrictions
+		
+		@staticmethod
+		def create_from_version(version):
+			return Pom.ArtifactVersionRange(ArtifactVersion(version), [])
+		
+		@staticmethod
+		def create_from_version_spec(spec):
+			if spec is None:
+				return None
+			restrictions = []
+			process = spec
+			version = None
+			lower_bound = None
+			upper_bound = None
+			
+			while process.startswith('[') or process.startswith('('):
+				idx1 = process.find(')')
+				idx = idx2 = process.find(']')
+				if (idx < 0 or idx1 < idx2) and (idx1 >= 0):
+					idx = idx1
+				if idx < 0:
+					raise Pom.ArtifactVersionException('Unbounded range: ' + spec)
+				restriction = Pom.ArtifactVersionRange.parse_restriction(process[0:idx+1])
+				if lower_bound is None:
+					lower_bound = restriction.lower_bound
+				if upper_bound is not None:
+					lb = restriction.lower_bound
+					if  lb is None or lb.compare_to(upper_bound) < 0:
+						raise Pom.ArtifactVersionException('Ranges overlap: ' + spec)
+				restrictions.append(restriction)
+				upper_bound = restriction.upper_bound
+				process = process[idx + 1:].strip()
+				if len(process) > 0 and process.startswith(','):
+					process = process[1:].strip()
+			if len(process) > 0:
+				if len(restrictions) > 0:
+					raise Pom.ArtifactVersionException('Only fully-qualified sets allowed in multiple set scenario: ' + spec)
+				else:
+					version = Pom.ArtifactVersion(process)
+					restrictions.append(Pom.ArtifactVersionRestriction.everything())
+			return Pom.ArtifactVersionRange(version, restrictions)
+		
+		
+		@staticmethod
+		def parse_restriction(spec):
+			lower_inclusive = spec.startswith('[')
+			upper_inclusive = spec.endswith(']')
+			process = spec[1:-1].strip()
+			idx = process.find(',')
+			if idx < 0:
+				if not lower_inclusive or not upper_inclusive:
+					raise Pom.ArtifactVersionException('Single version must be surrounded by []: ' + spec)
+				version = Pom.ArtifactVersion(process)
+				return Pom.ArtifactVersionRestriction(version, lower_inclusive, version, upper_inclusive)
+			else:
+				lower_bound = process[0:idx].strip()
+				upper_bound = process[idx+1:].strip()
+				if lower_bound == upper_bound:
+					raise Pom.ArtifactVersionException('Range cannot have identical boundries: ' + spec)
+				lower_version = Pom.ArtifactVersion(lower_bound) if len(lower_bound) > 0 else None
+				upper_version = Pom.ArtifactVersion(upper_bound) if len(upper_bound) > 0 else None
+				if upper_version is not None and lower_version is not None and upper_version.compare_to(lower_version) < 0:
+					raise Pom.ArtifactVersionException('Ranges defies version ordering: ' + spec)
+				return Pom.ArtifactVersionRestriction(lower_version, lower_inclusive, upper_version, upper_inclusive)
+		
+		def __eq__(self, other):
+			if not isinstance(other, self.__class__):
+				return False
+			if self.recommended_version == other.recommended_version:
+				equals = True
+			else:
+				equals = (self.recommended_version is not None and self.recommended_version == other.recommended_version)
+			if self.restrictions == other.restrictions:
+				equals &= True
+			else:
+				equals &= (self.restrictions is not None and self.restrictions == other.restrictions)
+			return equals
+		
+		def __ne__(self, other):
+			return not self.__eq__(other)
+		
+		def __hash__(self):
+			value = 7
+			value = 31 * value + (0 if self.recommended_version is None else hash(self.recommended_version))
+			value = 31 * value + (0 if self.restrictions is None else hash(self.restrictions))
+			return value
+			
+		def __str__(self):
+			if self.recommended_version is not None:
+				return str(self.recommended_version)
+			else:
+				return ','.join(str(v) for v in self.restrictions)
+	
+	class ArtifactVersionException(Exception):
+		pass
+	
+	class ArtifactVersionRestriction(object):
+		def __init__(self, lower_bound, lower_inclusive, upper_bound, upper_inclusive):
+			self.lower_bound = lower_bound
+			self.lower_inclusive = lower_inclusive
+			self.upper_bound = upper_bound
+			self.upper_inclusive = upper_inclusive
+		
+		@staticmethod
+		def everything():
+			return Pom.ArtifactVersionRestriction(None, False, None, False)
+		
+		def contains_version(self, version):
+			if not isinstance(version, Pom.ArtifactVersion):
+				return False
+			if self.lower_bound is not None:
+				cmp_ret = self.lower_bound.compare_to(version)
+				if cmp_ret == 0 and not self.lower_inclusive:
+					return False
+				if cmp_ret > 0:
+					return False
+			if self.upper_bound is not None:
+				cmp_ret = self.upper_bound.compare_to(version)
+				if cmp_ret == 0 and not self.upper_inclusive:
+					return False
+				if cmp_ret < 0:
+					return False
+			return True
+		
+		def __eq__(self, other):
+			if not isinstance(other, self.__class__):
+				return False
+			if self.lower_bound is not None:
+				if self.lower_bound != other.lower_bound:
+					return False
+			elif other.lower_bound is not None:
+				return False
+			if self.lower_inclusive != other.lower_inclusive:
+				return False
+			if self.upper_bound is not None:
+				if self.upper_bound != other.upper_bound:
+					return False
+			elif other.upper_bound is not None:
+				return False
+			return self.upper_inclusive == other.upper_inclusive
+		
+		def __ne__(self, other):
+			return not self.__eq__(other)
+		
+		def __hash__(self):
+			res = 13
+			if self.lower_bound is not None:
+				res += 1
+			else:
+				res += hash(self.lower_bound)
+			res = res * (1 if self.lower_inclusive else 2)
+			if self.upper_bound is not None:
+				res -= 3
+			else:
+				res -= hash(self.upper_bound)
+			res = res * (2 if self.upper_inclusive else 3)
+			return res
+		
+		def __str__(self):
+			buf = ''
+			buf += '[' if self.lower_inclusive else '('
+			if self.lower_bound is not None:
+				buf += str(self.lower_bound)
+			buf += ','
+			if self.upper_bound is not None:
+				buf += str(self.upper_bound)
+			buf += ']' if self.upper_inclusive else ')'
+			return buf
+		
+		def __repr__(self):
+			return "'" + self.__str__() + "'"
 	
 	class Artifact():
 		def __init__(self, origin, parent, groupId, artifactId, packaging, classifier, version):

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import imp
+import imp, pytest
 
 with open('ar.mvn.py', 'rb') as fp:
 	mvn = imp.load_module('ar_mvn', fp, 'ar.mvn.py', ('.py', 'rb', imp.PY_SOURCE))
@@ -293,6 +293,317 @@ class Test_ArtifactVersionComparer(object):
 				high = c[j]
 				assert low.compare_to(high) < 0,  "expected " + low + " < " + high
 				assert high.compare_to(low) > 0,  "expected " + high + " > " + low
+
+class Test_ArtifactVersionRange(object):
+	CHECK_NUM_RESTRICTIONS = "check number of restrictions";
+	CHECK_UPPER_BOUND = "check upper bound";
+	CHECK_UPPER_BOUND_INCLUSIVE = "check upper bound is inclusive";
+	CHECK_LOWER_BOUND = "check lower bound";
+	CHECK_LOWER_BOUND_INCLUSIVE = "check lower bound is inclusive";
+	CHECK_VERSION_RECOMMENDATION = "check version recommended";
+	CHECK_SELECTED_VERSION_KNOWN = "check selected version known";
+	CHECK_SELECTED_VERSION = "check selected version";
+	
+	def test_range(self):
+		self.single_range_test('(,1.0]', 1, None, False, '1.0', True, None, False, None)
+		self.single_range_test('1.0', 1, None, False, None, False, '1.0', True, '1.0')
+		self.single_range_test('[1.0]', 1, '1.0', True, '1.0', True, None, False, None)
+		self.single_range_test('[1.2,1.3]', 1, '1.2', True, '1.3', True, None, False, None)
+		self.single_range_test('[1.0,2.0)', 1, '1.0', True, '2.0', False, None, False, None)
+		self.single_range_test('[1.5,)', 1, '1.5', True, None, False, None, False, None)
+		self.single_range_test('(,1.0],[1.2,)', 2, None, False, '1.0', True, None, False, None, 0)
+		self.single_range_test('(,1.0],[1.2,)', 2, '1.2', True, None, False, None, False, None, 1)
+		
+		vr = self.create_from_version_spec('[1.0,)')
+		assert vr.contains_version(mvn.Pom.ArtifactVersion('1.0-SNAPSHOT')) == False
+		vr = self.create_from_version_spec('[1.0,1.1-SNAPSHOT]')
+		assert vr.contains_version(mvn.Pom.ArtifactVersion('1.1-SNAPSHOT')) == True
+		vr = self.create_from_version_spec('[5.0.9.0,5.0.10.0)')
+		assert vr.contains_version(mvn.Pom.ArtifactVersion('5.0.9.0')) == True
+	
+	def test_invalid_ranges(self):
+		# surround by []
+		self.check_invalid_range("(1.0)")
+		self.check_invalid_range("[1.0)")
+		self.check_invalid_range("(1.0]")
+		# identical boundries
+		self.check_invalid_range("(1.0,1.0]")
+		self.check_invalid_range("[1.0,1.0)")
+		self.check_invalid_range("(1.0,1.0)")
+		# fully-qualified sets
+		self.check_invalid_range("[1.1,1.0]")
+		self.check_invalid_range("[1.0,1.2),1.3")
+		# overlap
+		self.check_invalid_range("[1.0,1.2),(1.1,1.3]")
+		self.check_invalid_range("[1.1,1.3),(1.0,1.2]")
+		self.check_invalid_range("(1.1,1.2],[1.0,1.1)")
+	
+	def test_intersections(self):
+		vr1 = self.create_from_version_spec('1.0')
+		vr2 = self.create_from_version_spec('1.1')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 1, None, False, None, False, '1.0', True, '1.0')
+		mvr = vr2.restrict(vr1)
+		self.single_range_test(mvr, 1, None, False, None, False, '1.1', True, '1.1')
+		
+		vr1 = self.create_from_version_spec('[1.0,)')
+		vr2 = self.create_from_version_spec('1.1')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 1, '1.0', True, None, False, '1.1', True, '1.1')
+		
+		vr1 = self.create_from_version_spec('[1.1,)')
+		vr2 = self.create_from_version_spec('1.1')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 1, '1.1', True, None, False, '1.1', True, '1.1')
+		
+		vr1 = self.create_from_version_spec('[1.1]')
+		vr2 = self.create_from_version_spec('1.1')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 1, '1.1', True, '1.1', True, '1.1', True, '1.1')
+		
+		vr1 = self.create_from_version_spec('(1.1,)')
+		vr2 = self.create_from_version_spec('1.1')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 1, '1.1', False, None, False, None, False, None)
+		
+		vr1 = self.create_from_version_spec('[1.2,)')
+		vr2 = self.create_from_version_spec('1.1')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 1, '1.2', True, None, False, None, False, None)
+		
+		vr1 = self.create_from_version_spec('(,1.2]')
+		vr2 = self.create_from_version_spec('1.1')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 1, None, False, '1.2', True, '1.1', True, '1.1')
+		
+		vr1 = self.create_from_version_spec('(,1.1]')
+		vr2 = self.create_from_version_spec('1.1')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 1, None, False, '1.1', True, '1.1', True, '1.1')
+		
+		vr1 = self.create_from_version_spec('(,1.1)')
+		vr2 = self.create_from_version_spec('1.1')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 1, None, False, '1.1', False, None, False, None)
+		
+		vr1 = self.create_from_version_spec('(,1.0]')
+		vr2 = self.create_from_version_spec('1.1')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 1, None, False, '1.0', True, None, False, None)
+		
+		vr1 = self.create_from_version_spec('(,1.0], [1.1,)')
+		vr2 = self.create_from_version_spec('1.2')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 2, None, False, '1.0', True, '1.2', True, '1.2', 0)
+		self.single_range_test(mvr, 2, '1.1', True, None, False, '1.2', True, '1.2', 1)
+		
+		vr1 = self.create_from_version_spec('(,1.0], [1.1,)')
+		vr2 = self.create_from_version_spec('1.0.5')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 2, None, False, '1.0', True, None, False, None, 0)
+		self.single_range_test(mvr, 2, '1.1', True, None, False, None, False, None, 1)
+		
+		vr1 = self.create_from_version_spec('(,1.1), (1.1,)')
+		vr2 = self.create_from_version_spec('1.1')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 2, None, False, '1.1', False, None, False, None, 0)
+		self.single_range_test(mvr, 2, '1.1', False, None, False, None, False, None, 1)
+		
+		vr1 = self.create_from_version_spec('[1.1, 1.3]')
+		vr2 = self.create_from_version_spec('(1.1,)')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 1, '1.1', False, '1.3', True, None, False, None)
+		
+		vr1 = self.create_from_version_spec('(,1.3)')
+		vr2 = self.create_from_version_spec('[1.2,1.3]')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 1, '1.2', True, '1.3', False, None, False, None)
+		
+		vr1 = self.create_from_version_spec('[1.1,1.3]')
+		vr2 = self.create_from_version_spec('[1.2,)')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 1, '1.2', True, '1.3', True, None, False, None)
+		
+		vr1 = self.create_from_version_spec('(,1.3]')
+		vr2 = self.create_from_version_spec('[1.2,1.4]')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 1, '1.2', True, '1.3', True, None, False, None)
+		
+		vr1 = self.create_from_version_spec('(1.2,1.3]')
+		vr2 = self.create_from_version_spec('[1.1,1.4]')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 1, '1.2', False, '1.3', True, None, False, None)
+		
+		vr1 = self.create_from_version_spec('(1.2,1.3)')
+		vr2 = self.create_from_version_spec('[1.1,1.4]')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 1, '1.2', False, '1.3', False, None, False, None)
+		
+		vr1 = self.create_from_version_spec('[1.2,1.3)')
+		vr2 = self.create_from_version_spec('[1.1,1.4]')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 1, '1.2', True, '1.3', False, None, False, None)
+		
+		vr1 = self.create_from_version_spec('[1.0,1.1]')
+		vr2 = self.create_from_version_spec('[1.1,1.4]')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 1, '1.1', True, '1.1', True, None, False, None)
+		
+		vr1 = self.create_from_version_spec('[1.0,1.1)')
+		vr2 = self.create_from_version_spec('[1.1,1.4]')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 0, None, False, None, False, None, False, None)
+		
+		vr1 = self.create_from_version_spec('[1.0,1.2],[1.3,1.5]')
+		vr2 = self.create_from_version_spec('[1.1]')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 1, '1.1', True, '1.1', True, None, False, None)
+		
+		vr1 = self.create_from_version_spec('[1.0,1.2],[1.3,1.5]')
+		vr2 = self.create_from_version_spec('[1.4]')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 1, '1.4', True, '1.4', True, None, False, None)
+		
+		vr1 = self.create_from_version_spec('[1.0,1.2],[1.3,1.5]')
+		vr2 = self.create_from_version_spec('[1.1,1.4]')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 2, '1.1', True, '1.2', True, None, False, None, 0)
+		self.single_range_test(mvr, 2, '1.3', True, '1.4', True, None, False, None, 1)
+		
+		vr1 = self.create_from_version_spec('[1.0,1.2),(1.3,1.5]')
+		vr2 = self.create_from_version_spec('[1.1,1.4]')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 2, '1.1', True, '1.2', False, None, False, None, 0)
+		self.single_range_test(mvr, 2, '1.3', False, '1.4', True, None, False, None, 1)
+		
+		vr1 = self.create_from_version_spec('[1.0,1.2],[1.3,1.5]')
+		vr2 = self.create_from_version_spec('(1.1,1.4)')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 2, '1.1', False, '1.2', True, None, False, None, 0)
+		self.single_range_test(mvr, 2, '1.3', True, '1.4', False, None, False, None, 1)
+		
+		vr1 = self.create_from_version_spec('[1.0,1.2),(1.3,1.5]')
+		vr2 = self.create_from_version_spec('(1.1,1.4)')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 2, '1.1', False, '1.2', False, None, False, None, 0)
+		self.single_range_test(mvr, 2, '1.3', False, '1.4', False, None, False, None, 1)
+		
+		vr1 = self.create_from_version_spec('(,1.1),(1.4,)')
+		vr2 = self.create_from_version_spec('[1.1,1.4]')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 0, None, False, None, False, None, False, None)
+		
+		vr1 = self.create_from_version_spec('(,1.1],[1.4,)')
+		vr2 = self.create_from_version_spec('(1.1,1.4)')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 0, None, False, None, False, None, False, None)
+		
+		vr1 = self.create_from_version_spec('[,1.1],[1.4,]')
+		vr2 = self.create_from_version_spec('[1.2,1.3]')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 0, None, False, None, False, None, False, None)
+		
+		vr1 = self.create_from_version_spec('[1.0,1.2],[1.3,1.5]')
+		vr2 = self.create_from_version_spec('[1.1,1.4],[1.6,]')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 2, '1.1', True, '1.2', True, None, False, None, 0)
+		self.single_range_test(mvr, 2, '1.3', True, '1.4', True, None, False, None, 1)
+		
+		vr1 = self.create_from_version_spec('[1.0,1.2],[1.3,1.5]')
+		vr2 = self.create_from_version_spec('[1.1,1.4],[1.5,]')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 3, '1.1', True, '1.2', True, None, False, None, 0)
+		self.single_range_test(mvr, 3, '1.3', True, '1.4', True, None, False, None, 1)
+		self.single_range_test(mvr, 3, '1.5', True, '1.5', True, None, False, None, 2)
+		
+		vr1 = self.create_from_version_spec('[1.0,1.2],[1.3,1.7]')
+		vr2 = self.create_from_version_spec('[1.1,1.4],[1.5,1.6]')
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 3, '1.1', True, '1.2', True, None, False, None, 0)
+		self.single_range_test(mvr, 3, '1.3', True, '1.4', True, None, False, None, 1)
+		self.single_range_test(mvr, 3, '1.5', True, '1.6', True, None, False, None, 2)
+		
+		vr1 = self.create_from_version_spec('[,1.1],[1.4,]')
+		vr2 = self.create_from_version_spec('[1.2,1.3]')
+		vr1 = vr1.restrict(vr2)
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 0, None, False, None, False, None, False, None)
+		
+		vr1 = self.create_from_version_spec('[,1.1],[1.4,]')
+		vr2 = self.create_from_version_spec('[1.2,1.3]')
+		vr2 = vr1.restrict(vr2)
+		mvr = vr1.restrict(vr2)
+		self.single_range_test(mvr, 0, None, False, None, False, None, False, None)
+
+	def test_release_range_bounds_contains_snapshots(self):
+		vr = self.create_from_version_spec('[1.0,1.2]')
+		assert vr.contains_version(mvn.Pom.ArtifactVersion('1.1-SNAPSHOT')) == True
+		assert vr.contains_version(mvn.Pom.ArtifactVersion('1.2-SNAPSHOT')) == True
+		assert vr.contains_version(mvn.Pom.ArtifactVersion('1.0-SNAPSHOT')) == False
+	
+	def test_snapshot_range_bounds_can_contain_snapshots(self):
+		vr = self.create_from_version_spec('[1.0,1.2-SNAPSHOT]')
+		assert vr.contains_version(mvn.Pom.ArtifactVersion('1.1-SNAPSHOT')) == True
+		assert vr.contains_version(mvn.Pom.ArtifactVersion('1.2-SNAPSHOT')) == True
+		
+		vr = self.create_from_version_spec('[1.0-SNAPSHOT,1.2]')
+		assert vr.contains_version(mvn.Pom.ArtifactVersion('1.1-SNAPSHOT')) == True
+		assert vr.contains_version(mvn.Pom.ArtifactVersion('1.2-SNAPSHOT')) == True
+	
+	def test_snapshot_soft_version_can_contain_snapshot(self):
+		vr = self.create_from_version_spec('1.0-SNAPSHOT')
+		assert vr.contains_version(mvn.Pom.ArtifactVersion('1.0-SNAPSHOT')) == True
+	
+	def test_contains(self):
+		actual_version = mvn.Pom.ArtifactVersion('2.0.5')
+		assert self.enforce_version('2.0.5', actual_version) == True
+		assert self.enforce_version('2.0.4', actual_version) == True
+		assert self.enforce_version('[2.0.5]', actual_version) == True
+		assert self.enforce_version('[2.0.6,)', actual_version) == False
+		assert self.enforce_version('[2.0.6]', actual_version) == False
+		assert self.enforce_version('[2.0,2.1]', actual_version) == True
+		assert self.enforce_version('[2.0,2.0.3]', actual_version) == False
+		assert self.enforce_version('[2.0,2.0.5]', actual_version) == True
+		assert self.enforce_version('[2.0,2.0.5)', actual_version) == False
+	
+	def enforce_version(self, required_version_range, actual_version):
+		vr = self.create_from_version_spec(required_version_range)
+		return vr.contains_version(actual_version)
+	
+	def check_invalid_range(self, version):
+		try:
+			self.create_from_version_spec(version)
+			pytest.fail("Version '" + version + "' should have failed to construct")
+		except mvn.Pom.ArtifactVersionException as e:
+			return
+	
+	def ensure_artifact_version(self, version):
+		if version is None:
+			return None
+		elif isinstance(version, mvn.Pom.ArtifactVersion):
+			return version
+		else:
+			return mvn.Pom.ArtifactVersion(version)
+		
+	def single_range_test(self, spec, rlen, lower_bound, lower_inclusive, upper_bound, upper_inclusive, recommended_version, selected_know, selected_version, index=0):
+		if isinstance(spec, mvn.Pom.ArtifactVersionRange):
+			vr = spec
+		else:
+			vr = self.create_from_version_spec(spec)
+		assert rlen == len(vr.restrictions), self.__class__.CHECK_NUM_RESTRICTIONS + " (expected: {0}, got: {1})".format(rlen, len(vr.restrictions))
+		assert vr.recommended_version == self.ensure_artifact_version(recommended_version), self.__class__.CHECK_VERSION_RECOMMENDATION   + " (expected: {0}, got: {1})".format(recommended_version, vr.recommended_version)
+		if rlen == 0:
+			return
+		r = vr.restrictions[index]
+		assert r.lower_bound == self.ensure_artifact_version(lower_bound), self.__class__.CHECK_LOWER_BOUND + " (expected: {0}, got: {1})".format(lower_bound, r.lower_bound)
+		assert r.lower_inclusive == lower_inclusive, self.__class__.CHECK_LOWER_BOUND_INCLUSIVE  + " (expected: {0}, got: {1})".format(lower_inclusive, r.lower_inclusive)
+		assert r.upper_bound == self.ensure_artifact_version(upper_bound), self.__class__.CHECK_UPPER_BOUND + " (expected: {0}, got: {1})".format(upper_bound, r.upper_bound)
+		assert r.upper_inclusive == upper_inclusive, self.__class__.CHECK_UPPER_BOUND_INCLUSIVE  + " (expected: {0}, got: {1})".format(upper_inclusive, r.upper_inclusive)
+		assert vr.is_selected_version_known() == selected_know, self.__class__.CHECK_SELECTED_VERSION_KNOWN + " (expected: {0}, got: {1})".format(selected_know, vr.is_selected_version_known())
+		assert vr.selected_version() == self.ensure_artifact_version(selected_version), self.__class__.CHECK_SELECTED_VERSION + " (expected: {0}, got: {1})".format(selected_version, vr.selected_version())
+	
+	def create_from_version_spec(self, spec):
+		return mvn.Pom.ArtifactVersionRange.create_from_version_spec(spec)
 
 if __name__ == '__main__':
 	pass
