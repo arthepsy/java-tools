@@ -1,4 +1,7 @@
 *~
 *.pyc
 bin/
+.coverage
+htmlcov/
+
 
