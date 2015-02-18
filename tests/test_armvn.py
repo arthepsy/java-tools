@@ -139,13 +139,13 @@ class Test_ArtifactVersion(object):
 	
 	def check_version_parsing(self, version, major, minor, incremental, build_number, qualifier):
 		av = mvn.Pom.ArtifactVersion(version)
-		parsed = "'{0}' parsed as ('{1}', '{2}', '{3}', '{4}', '{5}'), ".format(version, av.get_major(), av.get_minor(), av.get_incremental(), av.get_build_number(), av.get_qualifier())
-		assert major == av.get_major(), parsed + "check major version"
-		assert minor == av.get_minor(), parsed + "check minor version"
-		assert incremental == av.get_incremental(), parsed + "check incremental version"
-		assert build_number == av.get_build_number(), parsed + "check build number .. [{0}][{1}]".format(build_number, av.get_build_number())
-		assert qualifier == av.get_qualifier(), parsed + "check qualifier"
-		assert major == av.get_major(), parsed + "check major version"
+		parsed = "'{0}' parsed as ('{1}', '{2}', '{3}', '{4}', '{5}'), ".format(version, av.major, av.minor, av.incremental, av.build_number, av.qualifier)
+		assert major == av.major, parsed + "check major version"
+		assert minor == av.minor, parsed + "check minor version"
+		assert incremental == av.incremental, parsed + "check incremental version"
+		assert build_number == av.build_number, parsed + "check build number .. [{0}][{1}]".format(build_number, av.build_number)
+		assert qualifier == av.qualifier, parsed + "check qualifier"
+		assert major == av.major, parsed + "check major version"
 		assert version == str(av), parsed + "check string value"
 	
 	def assert_version_older(self, left, right):

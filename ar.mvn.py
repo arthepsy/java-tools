@@ -539,32 +539,41 @@ class Pom():
 	
 	class ArtifactVersion():
 		def __init__(self, version):
-			self.major = None
-			self.minor = None
-			self.incremental = None
-			self.build_number = None
-			self.qualifier = None
+			self.__major = None
+			self.__minor = None
+			self.__incremental = None
+			self.__build_number = None
+			self.__qualifier = None
 			self._parse(version)
-			self.comparer = Pom.ArtifactVersionComparer(version)
+			self.__comparer = Pom.ArtifactVersionComparer(version)
 		
-		def get_major(self):
-			return self.major or 0
+		@property
+		def major(self):
+			return self.__major or 0
 		
-		def get_minor(self):
-			return self.minor or 0
+		@property
+		def minor(self):
+			return self.__minor or 0
 		
-		def get_incremental(self):
-			return self.incremental or 0
+		@property
+		def incremental(self):
+			return self.__incremental or 0
 		
-		def get_build_number(self):
-			return self.build_number or 0
+		@property
+		def build_number(self):
+			return self.__build_number or 0
 		
-		def get_qualifier(self):
-			return self.qualifier
+		@property
+		def qualifier(self):
+			return self.__qualifier
+		
+		@property
+		def comparer(self):
+			return self.__comparer
 		
 		def compare_to(self, other):
 			if isinstance(other, self.__class__):
-				return self.comparer.compare_to(other.comparer)
+				return self.__comparer.compare_to(other.comparer)
 			else:
 				return self.compare_to(Pom.ArtifactVersion(str(other)))
 		
@@ -595,41 +604,41 @@ class Pom():
 			if p2 is not None:
 				try:
 					if len(p2) == 1 or not p2.startswith('0'):
-						self.build_number = self._get_int(p2) 
+						self.__build_number = self._get_int(p2) 
 					else:
-						self.qualifier = p2
+						self.__qualifier = p2
 				except ValueError:
-					self.qualifier = p2
+					self.__qualifier = p2
 			if p1.find('.') < 0 and not p1.startswith('0'):
 				try:
-					self.major = self._get_int(p1)
+					self.__major = self._get_int(p1)
 				except ValueError:
-					self.qualifier = version
-					self.build_number = None
+					self.__qualifier = version
+					self.__build_number = None
 			else:
 				fallback =  p1.find('..') >= 0 or p1.startswith('.') or p1.endswith('.')
 				if not fallback:
 					tokens = p1.split('.')
 					try:
-						self.major = self._get_token_int(tokens)
+						self.__major = self._get_token_int(tokens)
 						if tokens:
-							self.minor = self._get_token_int(tokens)
+							self.__minor = self._get_token_int(tokens)
 						if tokens:
-							self.incremental = self._get_token_int(tokens)
+							self.__incremental = self._get_token_int(tokens)
 						if tokens:
-							self.qualifier = tokens.pop(0)
-							fallback = self.qualifier.isdigit()
+							self.__qualifier = tokens.pop(0)
+							fallback = self.__qualifier.isdigit()
 					except ValueError:
 						fallback = True
 				if fallback:
-					self.qualifier = version
-					self.major = None
-					self.minor = None
-					self.incremental = None
-					self.build_number = None
+					self.__qualifier = version
+					self.__major = None
+					self.__minor = None
+					self.__incremental = None
+					self.__build_number = None
 		
 		def __str__(self):
-			return str(self.comparer)
+			return str(self.__comparer)
 		
 		def __eq__(self, other):
 			return isinstance(other, self.__class__) and self.compare_to(other) == 0
@@ -638,7 +647,7 @@ class Pom():
 			return not self.__eq__(other)
 		
 		def __hash__(self):
-			return 11 + hash(self.comparer)
+			return 11 + hash(self.__comparer)
 	
 	class ArtifactVersionComparer(object):
 		def __init__(self, version):
