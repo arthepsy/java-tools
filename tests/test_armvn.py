@@ -261,8 +261,8 @@ class Test_ArtifactVersionComparer(object):
 	
 	def new_comparer(self, version):
 		ret = mvn.Pom.ArtifactVersionComparer(version)
-		canonical = ret.get_canonical()
-		parsed_canonical = mvn.Pom.ArtifactVersionComparer(canonical).get_canonical()
+		canonical = ret.canonical
+		parsed_canonical = mvn.Pom.ArtifactVersionComparer(canonical).canonical
 		#print "canonical( " + version + " ) = " + canonical
 		assert canonical == parsed_canonical, "canonical( " + version + " ) = " + canonical + " -> canonical: " + parsedCanonical
 		return ret

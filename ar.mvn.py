@@ -641,16 +641,30 @@ class Pom():
 			return 11 + hash(self.comparer)
 	
 	class ArtifactVersionComparer(object):
-		
 		def __init__(self, version):
 			self._parse(version)
 		
+		@property
+		def value(self):
+			return self.__value
+		
+		@property
+		def canonical(self):
+			return self.__canonical
+		
+		@property
+		def items(self):
+			return self.__items
+		
+		def compare_to(self, other):
+			return isinstance(other, self.__class__) and self.items.compare_to(other.items)
+		
 		def _parse(self, version):
-			self.value = version
-			self.items = Pom.ArtifactVersionComparer.ListItem()
+			self.__value = version
+			self.__items = Pom.ArtifactVersionComparer.ListItem()
 			
 			version = version.lower()
-			lizt  = self.items
+			lizt  = self.__items
 			stack = []
 			stack.append(lizt)
 			is_digit = False
@@ -690,20 +704,14 @@ class Pom():
 				lizt.append(self._parse_item(is_digit, version[start_idx:]))
 			while stack:
 				lizt = stack.pop()
-				lizt.normalize()
-			self.canonical = str(self.items)
+				lizt._normalize()
+			self.__canonical = str(self.items)
 		
 		def _parse_item(self, is_digit, value):
 			if is_digit:
 				return Pom.ArtifactVersionComparer.IntegerItem(value)
 			else:
 				return Pom.ArtifactVersionComparer.StringItem(value, False)
-		
-		def compare_to(self, other):
-			return isinstance(other, self.__class__) and self.items.compare_to(other.items)
-		
-		def get_canonical(self):
-			return self.canonical
 		
 		def __str__(self):
 			return self.value
@@ -719,45 +727,55 @@ class Pom():
 		
 		
 		class Item(object):
-			INTEGER_ITEM = 0
-			STRING_ITEM = 1
-			LIST_ITEM = 2
+			def __init__(self, value=None):
+				self.__value = value
 			
-			def get_type(self):
-				raise NotImplementedError("Class %s doesn't implement method get_type()" % self.__class__.__name__)
+			@property
+			def value(self):
+				return self.__value
+			
+			def _raise(self, method):
+				raise NotImplementedError("{0}.{1}".format(self.__class__.__name__, method))
+			
+			@property
 			def is_null(self):
-				raise NotImplementedError("Class %s doesn't implement method is_null()" % self.__class__.__name__)
+				self._raise('is_null')
+			
 			def compare_to(self, value):
-				raise NotImplementedError("Class %s doesn't implement method compare_to()" % self.__class__.__name__)
+				self._raise('compare_to()')
+			
 			def __str__(self):
-				raise NotImplementedError("Class %s doesn't implement method __str__()" % self.__class__.__name__)
+				self._raise('__str__()')
+		
 		
 		class IntegerItem(Item):
 			def __init__(self, value=None):
-				self.value = 0 if value is None else int(value)
+				value = int(value) if value is not None else 0
+				super(self.__class__, self).__init__(value)
 			
-			def get_type(self):
-				return Pom.ArtifactVersionComparer.Item.INTEGER_ITEM
-			
+			@property
 			def is_null(self):
 				return self.value == 0
 			
 			def compare_to(self, item):
 				if item is None:
-					return 0 if self.is_null() else 1 # 1.0 == 1, 1.1 > 1
-				item_type = item.get_type()
-				if item_type == Pom.ArtifactVersionComparer.Item.INTEGER_ITEM:
+					return 0 if self.is_null else 1 # 1.0 == 1, 1.1 > 1
+				item_type = type(item)
+				if item_type is Pom.ArtifactVersionComparer.IntegerItem:
 					return cmp(self.value, item.value)
-				elif item_type == Pom.ArtifactVersionComparer.Item.STRING_ITEM:
+				elif item_type is Pom.ArtifactVersionComparer.StringItem:
 					return 1 # 1.1 > 1-sp
-				elif item_type == Pom.ArtifactVersionComparer.Item.LIST_ITEM:
+				elif item_type is Pom.ArtifactVersionComparer.ListItem:
 					return 1 # 1.1 > 1-1
+				else:
+					raise TypeError('Noncompareable type: %s' % type(item))
 			
 			def __str__(self):
 				return str(self.value)
 			
 			def __repr__(self):
 				return str(self)
+		
 		
 		class StringItem(Item):
 			QUALIFIERS = ["alpha", "beta", "milestone", "rc", "snapshot", "", "sp"]
@@ -768,11 +786,10 @@ class Pom():
 				if followed_by_digit and len(value) == 1:
 					replaces = {'a':'alpha', 'b':'beta', 'm':'milestone'}
 					value = replaces.get(value[0], value)
-				self.value = self.ALIASES.get(value, value)
+				value = self.ALIASES.get(value, value)
+				super(self.__class__, self).__init__(value)
 			
-			def get_type(self):
-				return Pom.ArtifactVersionComparer.Item.STRING_ITEM
-			
+			@property
 			def is_null(self):
 				return cmp(self._cmp_qualifier(self.value), self.RELEASE_VERSION_INDEX) == 0
 			
@@ -786,28 +803,28 @@ class Pom():
 			def compare_to(self, item):
 				if item is None:
 					return cmp(self._cmp_qualifier(self.value), self.RELEASE_VERSION_INDEX) # 1-rc < 1, 1-ga > 1
-				item_type = item.get_type()
-				if item_type == Pom.ArtifactVersionComparer.Item.INTEGER_ITEM:
+				item_type = type(item)
+				if item_type is Pom.ArtifactVersionComparer.IntegerItem:
 					return -1 # 1.any < 1.1 ?
-				elif item_type == Pom.ArtifactVersionComparer.Item.STRING_ITEM:
+				if item_type is Pom.ArtifactVersionComparer.StringItem:
 					return cmp(self._cmp_qualifier(self.value), self._cmp_qualifier(item.value))
-				elif item_type == Pom.ArtifactVersionComparer.Item.LIST_ITEM:
+				if item_type is Pom.ArtifactVersionComparer.ListItem:
 					return -1 # 1.any < 1.1
+				else:
+					raise TypeError('Noncompareable type: %s' % type(item))
 			
 			def __str__(self):
 				return self.value
 			
 			def __repr__(self):
-				return str(self)
+				return "'{0}'".format(str(self))
 		
 		
 		class ListItem(list, Item):
 			def __init__(self, *args, **kwargs):
 				list.__init__(self, *args, **kwargs)
 			
-			def get_type(self):
-				return Pom.ArtifactVersionComparer.Item.LIST_ITEM
-			
+			@property
 			def is_null(self):
 				return len(self) == 0
 			
@@ -817,12 +834,12 @@ class Pom():
 						return 0 # 1-0 = 1- (normalize) = 1
 					else:
 						return self[0].compare_to(None)
-				item_type = item.get_type()
-				if item_type == Pom.ArtifactVersionComparer.Item.INTEGER_ITEM:
+				item_type = type(item)
+				if item_type is Pom.ArtifactVersionComparer.IntegerItem:
 					return -1 # 1-1 < 1.0.x
-				elif item_type == Pom.ArtifactVersionComparer.Item.STRING_ITEM:
+				if item_type is Pom.ArtifactVersionComparer.StringItem:
 					return 1 # 1-1 > 1-sp
-				elif item_type == Pom.ArtifactVersionComparer.Item.LIST_ITEM:
+				if item_type is Pom.ArtifactVersionComparer.ListItem:
 					idx = 0
 					mlen = len(self)
 					olen = len(item)
@@ -840,11 +857,13 @@ class Pom():
 							return result
 						idx += 1
 					return 0
+				else:
+					raise TypeError('Noncompareable type: %s' % type(item))
 			
-			def normalize(self):
+			def _normalize(self):
 				for idx in xrange(len(self) - 1, -1, -1):
 					item = self[idx]
-					if item.is_null():
+					if item.is_null:
 						del self[idx]
 					elif not isinstance(item, Pom.ArtifactVersionComparer.ListItem):
 						break
