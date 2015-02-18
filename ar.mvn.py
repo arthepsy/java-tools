@@ -474,9 +474,9 @@ class Pom():
 			if parent_tag == 'project':
 				artifact = Pom.Artifact.parse(xroot, Pom.ArtifactOrigin.PROJECT)
 				if artifact is not None:
-					self['project.groupId'] = artifact.get_groupId()
+					self['project.groupId'] = artifact.groupId
 					self['project.artifactId'] = artifact.artifactId
-					self['project.version'] = artifact.get_version()
+					self['project.version'] = artifact.version
 					self.internal.add('project.groupId')
 					self.internal.add('project.artifactId')
 					self.internal.add('project.version')
@@ -1204,20 +1204,46 @@ class Pom():
 	
 	class Artifact():
 		def __init__(self, origin, parent, groupId, artifactId, packaging, classifier, version):
-			self.origin = Pom.ArtifactOrigin.ensure(origin)
-			self.parent = parent
-			self.groupId = groupId
-			self.artifactId = artifactId
-			self.packaging = packaging
-			self.classifier = classifier
-			self.version = version
-			self.moduleId = self.get_module_id()
+			self.__origin = Pom.ArtifactOrigin.ensure(origin)
+			self.__parent = parent
+			self.__groupId = groupId
+			self.__artifactId = artifactId
+			self.__packaging = packaging
+			self.__classifier = classifier
+			self.__version = version
+			self.__moduleId = self.get_module_id()
 		
-		def get_groupId(self):
-			return self.groupId if len(self.groupId) > 0 else self.parent.groupId
+		@property
+		def origin(self):
+			return self.__origin
 		
-		def get_version(self):
-			return self.version if len(self.version) > 0 else self.parent.version
+		@property
+		def parent(self):
+			return self.__parent
+		
+		@property
+		def groupId(self):
+			return self.__groupId if len(self.__groupId) > 0 else self.__parent.__groupId
+		
+		@property
+		def artifactId(self):
+			return self.__artifactId
+			
+		@property
+		def version(self):
+			return self.__version if len(self.__version) > 0 else self.__parent.__version
+		
+		@property
+		def packaging(self):
+			return self.__packaging
+		
+		@property
+		def classifier(self):
+			return self.__classifier
+		
+		@property
+		def moduleId(self):
+			return self.__moduleId
 		
 		@staticmethod
 		def get_parts(module_name):
@@ -1240,13 +1266,13 @@ class Pom():
 				parts['classifier'] = clean(p[3])
 				parts['version'] = clean(p[4])
 			return parts
-			
+		
 		def match(self, groupId=None, artifactId=None, packaging=None, classifier=None, version=None):
-			if groupId is not None and self.get_groupId() != groupId: return False
+			if groupId is not None and self.groupId != groupId: return False
 			if artifactId is not None and self.artifactId != artifactId: return False
 			if packaging is not None and self.packaging != packaging: return False
 			if classifier is not None and self.classifier != classifier: return False
-			if version is not None and self.get_version() != version: return False
+			if version is not None and self.version != version: return False
 			return True
 		
 		def match_name(self, name):
@@ -1258,13 +1284,13 @@ class Pom():
 			                  parts.get('version'))
 		
 		def get_module_id(self, full=False):
-			moduleId = self.get_groupId() + ':' + self.artifactId + ':'
+			moduleId = self.groupId + ':' + self.artifactId + ':'
 			if full:
 				if len(self.classifier) > 0:
 					moduleId += self.packaging + ':' + self.classifier + ':'
 				elif self.packaging != 'jar':
 					moduleId += self.packaging + ':'
-			moduleId += self.get_version()
+			moduleId += self.version
 			return moduleId
 		
 		def __eq__(self, other):
