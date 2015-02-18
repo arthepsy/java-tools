@@ -599,8 +599,8 @@ class Test_ArtifactVersionRange(object):
 		assert r.lower_inclusive == lower_inclusive, self.__class__.CHECK_LOWER_BOUND_INCLUSIVE  + " (expected: {0}, got: {1})".format(lower_inclusive, r.lower_inclusive)
 		assert r.upper_bound == self.ensure_artifact_version(upper_bound), self.__class__.CHECK_UPPER_BOUND + " (expected: {0}, got: {1})".format(upper_bound, r.upper_bound)
 		assert r.upper_inclusive == upper_inclusive, self.__class__.CHECK_UPPER_BOUND_INCLUSIVE  + " (expected: {0}, got: {1})".format(upper_inclusive, r.upper_inclusive)
-		assert vr.is_selected_version_known() == selected_know, self.__class__.CHECK_SELECTED_VERSION_KNOWN + " (expected: {0}, got: {1})".format(selected_know, vr.is_selected_version_known())
-		assert vr.selected_version() == self.ensure_artifact_version(selected_version), self.__class__.CHECK_SELECTED_VERSION + " (expected: {0}, got: {1})".format(selected_version, vr.selected_version())
+		assert vr.is_selected_version_known == selected_know, self.__class__.CHECK_SELECTED_VERSION_KNOWN + " (expected: {0}, got: {1})".format(selected_know, vr.is_selected_version_known)
+		assert vr.selected_version == self.ensure_artifact_version(selected_version), self.__class__.CHECK_SELECTED_VERSION + " (expected: {0}, got: {1})".format(selected_version, vr.selected_version)
 	
 	def create_from_version_spec(self, spec):
 		return mvn.Pom.ArtifactVersionRange.create_from_version_spec(spec)

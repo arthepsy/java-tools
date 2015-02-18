@@ -859,54 +859,61 @@ class Pom():
 	
 	class ArtifactVersionRange(object):
 		def __init__(self, recommended_version, restrictions):
-			self.recommended_version = recommended_version
-			self.restrictions = restrictions
+			self.__recommended_version = recommended_version
+			self.__restrictions = restrictions
 		
+		@property
+		def recommended_version(self):
+			return self.__recommended_version
+		
+		@property
+		def restrictions(self):
+			return self.__restrictions
+		
+		@property
 		def selected_version(self):
-			if self.recommended_version is not None:
-				return self.recommended_version
+			if self.__recommended_version is not None:
+				return self.__recommended_version
 			else:
-				if len(self.restrictions) == 0:
+				if len(self.__restrictions) == 0:
 					raise Pom.ArtifactVersionException('The artifact has no valid ranges')
 			return None
-			
+		
+		@property
 		def is_selected_version_known(self):
-			if self.recommended_version is not None:
-				return True
-			else:
-				if len(self.restrictions) == 0:
-					raise Pom.ArtifactVersionException('The artifact has no valid ranges')
-			return False
+			try:
+				return self.selected_version is not None
+			except Pom.ArtifactVersionException:
+				return False
 		
 		def contains_version(self, version):
-			for restriction in self.restrictions:
+			for restriction in self.__restrictions:
 				if restriction.contains_version(version):
 					return True
 			return False
 		
 		def restrict(self, other):
-			# TODO: read (iterate), not modify (pop).
-			r1 = self.restrictions
+			r1 = self.__restrictions
 			r2 = other.restrictions
 			if (r1 is None or len(r1) == 0) or (r2 is None or len(r2) == 0):
 				restrictions = []
 			else:
-				restrictions = self.intersection(r1, r2)
+				restrictions = self._intersection(r1, r2)
 			version = None
 			if len(restrictions) > 0:
-				for r in self.restrictions:
-					if self.recommended_version is not None and r.contains_version(self.recommended_version):
-						version = self.recommended_version
+				for r in self.__restrictions:
+					if self.__recommended_version is not None and r.contains_version(self.__recommended_version):
+						version = self.__recommended_version
 						break
 					elif version is None and other.recommended_version is not None and r.contains_version(other.recommended_version):
 						version = other.recommended_version
-			elif self.recommended_version is not None:
-				version = self.recommended_version
+			elif self.__recommended_version is not None:
+				version = self.__recommended_version
 			elif other.recommended_version is not None:
 				version = other.recommended_version
 			return Pom.ArtifactVersionRange(version, restrictions)
 		
-		def intersection(self, r1, r2):
+		def _intersection(self, r1, r2):
 			restrictions = []
 			i1 = iter(r1)
 			i2 = iter(r2)
@@ -1047,14 +1054,14 @@ class Pom():
 		def __eq__(self, other):
 			if not isinstance(other, self.__class__):
 				return False
-			if self.recommended_version == other.recommended_version:
+			if self.__recommended_version == other.__recommended_version:
 				equals = True
 			else:
-				equals = (self.recommended_version is not None and self.recommended_version == other.recommended_version)
-			if self.restrictions == other.restrictions:
-				equals &= True
-			else:
-				equals &= (self.restrictions is not None and self.restrictions == other.restrictions)
+				equals = (self.__recommended_version is not None and self.__recommended_version == other.__recommended_version)
+			if equals == False:
+				return False
+			if not self.__restrictions == other.__restrictions:
+				equals &= (self.__restrictions is not None and self.__restrictions == other.__restrictions)
 			return equals
 		
 		def __ne__(self, other):
@@ -1062,15 +1069,15 @@ class Pom():
 		
 		def __hash__(self):
 			value = 7
-			value = 31 * value + (0 if self.recommended_version is None else hash(self.recommended_version))
-			value = 31 * value + (0 if self.restrictions is None else hash(self.restrictions))
+			value = 31 * value + (hash(self.__recommended_version) if self.__recommended_version is not None else 0)
+			value = 31 * value + (hash(self.__restrictions) if self.__restrictions is not None else 0)
 			return value
 			
 		def __str__(self):
-			if self.recommended_version is not None:
-				return str(self.recommended_version)
+			if self.__recommended_version is not None:
+				return str(self.__recommended_version)
 			else:
-				return ','.join(str(v) for v in self.restrictions)
+				return ','.join(str(v) for v in self.__restrictions)
 	
 	class ArtifactVersionException(Exception):
 		pass
