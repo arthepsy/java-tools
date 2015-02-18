@@ -1084,10 +1084,26 @@ class Pom():
 	
 	class ArtifactVersionRestriction(object):
 		def __init__(self, lower_bound, lower_inclusive, upper_bound, upper_inclusive):
-			self.lower_bound = lower_bound
-			self.lower_inclusive = lower_inclusive
-			self.upper_bound = upper_bound
-			self.upper_inclusive = upper_inclusive
+			self.__lower_bound = lower_bound
+			self.__lower_inclusive = lower_inclusive
+			self.__upper_bound = upper_bound
+			self.__upper_inclusive = upper_inclusive
+		
+		@property
+		def lower_bound(self):
+			return self.__lower_bound
+		
+		@property
+		def upper_bound(self):
+			return self.__upper_bound
+		
+		@property
+		def lower_inclusive(self):
+			return self.__lower_inclusive
+		
+		@property
+		def upper_inclusive(self):
+			return self.__upper_inclusive
 		
 		@staticmethod
 		def everything():
@@ -1096,15 +1112,15 @@ class Pom():
 		def contains_version(self, version):
 			if not isinstance(version, Pom.ArtifactVersion):
 				return False
-			if self.lower_bound is not None:
-				cmp_ret = self.lower_bound.compare_to(version)
-				if cmp_ret == 0 and not self.lower_inclusive:
+			if self.__lower_bound is not None:
+				cmp_ret = self.__lower_bound.compare_to(version)
+				if cmp_ret == 0 and not self.__lower_inclusive:
 					return False
 				if cmp_ret > 0:
 					return False
-			if self.upper_bound is not None:
-				cmp_ret = self.upper_bound.compare_to(version)
-				if cmp_ret == 0 and not self.upper_inclusive:
+			if self.__upper_bound is not None:
+				cmp_ret = self.__upper_bound.compare_to(version)
+				if cmp_ret == 0 and not self.__upper_inclusive:
 					return False
 				if cmp_ret < 0:
 					return False
@@ -1113,46 +1129,46 @@ class Pom():
 		def __eq__(self, other):
 			if not isinstance(other, self.__class__):
 				return False
-			if self.lower_bound is not None:
-				if self.lower_bound != other.lower_bound:
+			if self.__lower_bound is not None:
+				if self.__lower_bound != other.__lower_bound:
 					return False
-			elif other.lower_bound is not None:
+			elif other.__lower_bound is not None:
 				return False
-			if self.lower_inclusive != other.lower_inclusive:
+			if self.__lower_inclusive != other.__lower_inclusive:
 				return False
-			if self.upper_bound is not None:
-				if self.upper_bound != other.upper_bound:
+			if self.__upper_bound is not None:
+				if self.__upper_bound != other.__upper_bound:
 					return False
-			elif other.upper_bound is not None:
+			elif other.__upper_bound is not None:
 				return False
-			return self.upper_inclusive == other.upper_inclusive
+			return self.__upper_inclusive == other.__upper_inclusive
 		
 		def __ne__(self, other):
 			return not self.__eq__(other)
 		
 		def __hash__(self):
 			res = 13
-			if self.lower_bound is not None:
+			if self.__lower_bound is not None:
 				res += 1
 			else:
-				res += hash(self.lower_bound)
-			res = res * (1 if self.lower_inclusive else 2)
-			if self.upper_bound is not None:
+				res += hash(self.__lower_bound)
+			res = res * (1 if self.__lower_inclusive else 2)
+			if self.__upper_bound is not None:
 				res -= 3
 			else:
-				res -= hash(self.upper_bound)
-			res = res * (2 if self.upper_inclusive else 3)
+				res -= hash(self.__upper_bound)
+			res = res * (2 if self.__upper_inclusive else 3)
 			return res
 		
 		def __str__(self):
 			buf = ''
-			buf += '[' if self.lower_inclusive else '('
-			if self.lower_bound is not None:
-				buf += str(self.lower_bound)
+			buf += '[' if self.__lower_inclusive else '('
+			if self.__lower_bound is not None:
+				buf += str(self.__lower_bound)
 			buf += ','
-			if self.upper_bound is not None:
-				buf += str(self.upper_bound)
-			buf += ']' if self.upper_inclusive else ')'
+			if self.__upper_bound is not None:
+				buf += str(self.__upper_bound)
+			buf += ']' if self.__upper_inclusive else ')'
 			return buf
 		
 		def __repr__(self):
