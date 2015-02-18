@@ -39,11 +39,11 @@ class Config(object):
 		self.verbose = verbose
 		self.pom_file = None
 
-class Pom():
+class Pom(object):
 	def __init__(self):
 		self.module_cache = {}
 	
-	class BuildGraphConf():
+	class BuildGraphConf(object):
 		def __init__(self, modules = None, profiles = None, level = 0):
 			self.modules = modules
 			self.profiles = profiles
@@ -80,7 +80,7 @@ class Pom():
 			conf.show_prefix = self.show_prefix
 			return conf
 	
-	class BuildGraph():
+	class BuildGraph(object):
 		def __init__():
 			pass
 		
@@ -223,7 +223,7 @@ class Pom():
 						sconf.parent_matched = matched
 						Pom.BuildGraph._build(sconf)
 	
-	class Xml():
+	class Xml(object):
 		@staticmethod
 		def get_group_id(xnode):
 			return Pom.Xml.get_child_node_value(xnode, 'groupId', '')
@@ -317,10 +317,18 @@ class Pom():
 			if xnode is None: return ''
 			return re.sub('^({[^{]*})?[ \t]*(.*)$', '\\2', xnode.tag.strip())
 	
-	class IO():
+	class IO(object):
 		def __init__(self, pom_file):
-			self.file_path = os.path.abspath(pom_file)
-			self.dir_path = os.path.abspath(os.path.dirname(pom_file))
+			self.__file_path = os.path.abspath(pom_file)
+			self.__dir_path = os.path.abspath(os.path.dirname(pom_file))
+		
+		@property
+		def file_path(self):
+			return self.__file_path
+		
+		@property
+		def dir_path(self):
+			return self.__dir_path
 	
 	class Properties(dict):
 		def _get_item_keys(self, value, ignore_list = None):
@@ -524,8 +532,7 @@ class Pom():
 			properties._expand_cache = {}
 			return properties
 	
-	
-	class ArtifactOrigin():
+	class ArtifactOrigin(object):
 		UNKNOWN = 0
 		PROJECT = 1
 		DEPENDENCY = 2
@@ -537,7 +544,7 @@ class Pom():
 			else:
 				return value
 	
-	class ArtifactVersion():
+	class ArtifactVersion(object):
 		def __init__(self, version):
 			self.__major = None
 			self.__minor = None
@@ -1202,7 +1209,7 @@ class Pom():
 		def __repr__(self):
 			return "'" + self.__str__() + "'"
 	
-	class Artifact():
+	class Artifact(object):
 		def __init__(self, origin, parent, groupId, artifactId, packaging, classifier, version):
 			self.__origin = Pom.ArtifactOrigin.ensure(origin)
 			self.__parent = parent
@@ -1366,23 +1373,24 @@ class Pom():
 	class Dependencies(dict):
 		def __init__(self, *args, **kwargs):
 			dict.__init__(self, *args, **kwargs)
-			self.managed = set()
-			self._managed = {}
+			self.__is_managed = set()
+			self.__managed = {}
 		
-		def get_managed(self):
-			if self._managed is None:
-				self._managed = {k: v for k, v in self.items() if k in self.managed}
-			return self._managed
+		@property
+		def managed(self):
+			if self.__managed is None:
+				self.__managed = {k: v for k, v in self.items() if k in self.__is_managed}
+			return self.__managed
 		
 		def add(self, dependency):
 			if dependency is None or not isinstance(dependency, Pom.Dependency):
 				return
 			self[dependency.artifact] = dependency
-			
+		
 		def add_managed(self, dependency):
 			self.add(dependency)
-			self.managed.add(dependency.artifact)
-			self._managed = None
+			self.__is_managed.add(dependency.artifact)
+			self.__managed = None
 		
 		@staticmethod
 		def populate(module, xroot):
@@ -1401,13 +1409,33 @@ class Pom():
 					continue
 				module.dependencies.add(dependency)
 	
-	class Dependency:
+	class Dependency(object):
 		def __init__(self, artifact, deptype, scope, system_path, optional):
-			self.artifact = artifact
-			self.deptype = deptype
-			self.scope = scope
-			self.system_path = system_path
-			self.optional = optional
+			self.__artifact = artifact
+			self.__deptype = deptype
+			self.__scope = scope
+			self.__system_path = system_path
+			self.__optional = optional
+		
+		@property
+		def artifact(self):
+			return self.__artifact
+		
+		@property
+		def deptype(self):
+			return self.__deptype
+		
+		@property
+		def scope(self):
+			return self.__scope
+		
+		@property
+		def system_path(self):
+			return self.__system_path
+		
+		@property
+		def optional(self):
+			return self.__optional
 		
 		@staticmethod
 		def _get_property(xnode, key, managed_dependencies, artifact, default_value = ''):
@@ -1524,12 +1552,12 @@ class Pom():
 			stack = []
 			parent = module.parent
 			while parent is not None:
-				stack.append(parent.dependencies.get_managed())
+				stack.append(parent.dependencies.managed)
 				parent = parent.parent
 			while stack:
 				dependencies.update(stack.pop())
 			if hasattr(module, 'dependencies'):
-				dependencies.update(module.dependencies.get_managed())
+				dependencies.update(module.dependencies.managed)
 			return dependencies
 	
 	class Module(BuildWeight):
@@ -1646,12 +1674,36 @@ class Pom():
 	class Profile(BuildWeight):
 		def __init__(self, pom_io, name, properties, modules, activation, depth = 0):
 			super(self.__class__, self).__init__()
-			self.depth = depth
-			self.io = pom_io
-			self.name = name
-			self.properties = properties
-			self.modules = modules
-			self.activation = activation
+			self.__depth = depth
+			self.__io = pom_io
+			self.__name = name
+			self.__properties = properties
+			self.__modules = modules
+			self.__activation = activation
+		
+		@property
+		def depth(self):
+			return self.__depth
+		
+		@property
+		def io(self):
+			return self.__io
+		
+		@property
+		def name(self):
+			return self.__name
+		
+		@property
+		def properties(self):
+			return self.__properties
+		
+		@property
+		def modules(self):
+			return self.__modules
+		
+		@property
+		def activation(self):
+			return self.__activation
 		
 		def show_graph(self, bgc = None, matched = False):
 			if bgc is None:
@@ -1692,7 +1744,7 @@ class Pom():
 		def __repr__(self):
 			return "Pom.Profile(%s)" % str(self)
 	
-	class Activation():
+	class Activation(object):
 		def __init__(self, by_default, prop_name, prop_value):
 			self.by_default = by_default
 			self.prop_name = prop_name
@@ -1729,7 +1781,7 @@ class Pom():
 			
 			return Pom.Activation(act_by_default, act_prop_name, act_prop_value)
 	
-	class BuildPath():
+	class BuildPath(object):
 		def __init__(self, profiles = set(), properties = {}):
 			self.profiles = set()
 			self.properties = {}
@@ -1827,7 +1879,7 @@ class Pom():
 		def __init__(self):
 			pass
 	
-	class BuildPathMap():
+	class BuildPathMap(object):
 		def __init__(self):
 			self.modules = {}
 			self.profiles = {}
@@ -1978,9 +2030,10 @@ class Pom():
 					b.profiles.add(profile_name)
 					self._add_profile_path(profile, b.clone())
 					self._process(b, profile.modules, [])
+
 pom = Pom()
 
-class Maven():
+class Maven(object):
 	def __init__(self, cfg):
 		if cfg is None or not isinstance(cfg, Config):
 			raise TypeError('config not valid', cfg)
@@ -2036,7 +2089,7 @@ class Maven():
 		for v in sorted(pom.dependencies.values(), key=lambda d: (d.scope, d.artifact.get_module_id())):
 			print v
 
-class CmdLine():
+class CmdLine(object):
 	_type_dir = click.Path(exists=True, file_okay=False, dir_okay=True, readable=True, resolve_path=True)
 	_type_rofile = click.Path(exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True)
 	_type_rwfile = click.Path(exists=False, file_okay=True, dir_okay=False, writable=True, resolve_path=True)
