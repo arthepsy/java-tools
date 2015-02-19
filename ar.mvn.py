@@ -355,11 +355,11 @@ class Pom(object):
 				activation = profile.activation
 				if activation.by_default:
 					subtext.append('+active')
-				if activation.prop_name is not None:
-					if activation.prop_value is None:
-						subtext.append('%s' % activation.prop_name)
+				if activation.property_name is not None:
+					if activation.property_value is None:
+						subtext.append('%s' % activation.property_name)
 					else:
-						subtext.append('%s=%s' % (activation.prop_name, activation.prop_value))
+						subtext.append('%s=%s' % (activation.property_name, activation.property_value))
 				if len(subtext) > 0:
 					text += ' (' + ','.join(subtext) + ')'
 			if conf.show_weight:
@@ -763,7 +763,7 @@ class Pom(object):
 			self.__build_number = None
 			self.__qualifier = None
 			self._parse(version)
-			self.__comparer = Pom.ArtifactVersionComparer(version)
+			self.__comparer = Pom.VersionComparer(version)
 		
 		@property
 		def major(self):
@@ -867,7 +867,7 @@ class Pom(object):
 		def __hash__(self):
 			return 11 + hash(self.__comparer)
 	
-	class ArtifactVersionComparer(object):
+	class VersionComparer(object):
 		def __init__(self, version):
 			self._parse(version)
 		
@@ -888,7 +888,7 @@ class Pom(object):
 		
 		def _parse(self, version):
 			self.__value = version
-			self.__items = Pom.ArtifactVersionComparer.ListItem()
+			self.__items = Pom.VersionComparer.ListItem()
 			
 			version = version.lower()
 			lizt  = self.__items
@@ -902,7 +902,7 @@ class Pom(object):
 				new_list = False
 				if c == '.' or c == '-':
 					if idx == start_idx:
-						lizt.append(Pom.ArtifactVersionComparer.IntegerItem(0))
+						lizt.append(Pom.VersionComparer.IntegerItem(0))
 					else:
 						lizt.append(self._parse_item(is_digit, version[start_idx:idx]))
 					start_idx = idx + 1
@@ -910,7 +910,7 @@ class Pom(object):
 						new_list = True
 				elif c.isdigit():
 					if not is_digit and idx > start_idx:
-						lizt.append(Pom.ArtifactVersionComparer.StringItem(version[start_idx:idx], True))
+						lizt.append(Pom.VersionComparer.StringItem(version[start_idx:idx], True))
 						start_idx = idx
 						new_list = True
 					is_digit = True
@@ -922,7 +922,7 @@ class Pom(object):
 					is_digit = False
 				
 				if new_list:
-					new_lizt = Pom.ArtifactVersionComparer.ListItem()
+					new_lizt = Pom.VersionComparer.ListItem()
 					lizt.append(new_lizt)
 					lizt = new_lizt
 					stack.append(lizt)
@@ -936,9 +936,9 @@ class Pom(object):
 		
 		def _parse_item(self, is_digit, value):
 			if is_digit:
-				return Pom.ArtifactVersionComparer.IntegerItem(value)
+				return Pom.VersionComparer.IntegerItem(value)
 			else:
-				return Pom.ArtifactVersionComparer.StringItem(value, False)
+				return Pom.VersionComparer.StringItem(value, False)
 		
 		def __str__(self):
 			return self.value
@@ -988,11 +988,11 @@ class Pom(object):
 				if item is None:
 					return 0 if self.is_null else 1 # 1.0 == 1, 1.1 > 1
 				item_type = type(item)
-				if item_type is Pom.ArtifactVersionComparer.IntegerItem:
+				if item_type is Pom.VersionComparer.IntegerItem:
 					return cmp(self.value, item.value)
-				elif item_type is Pom.ArtifactVersionComparer.StringItem:
+				elif item_type is Pom.VersionComparer.StringItem:
 					return 1 # 1.1 > 1-sp
-				elif item_type is Pom.ArtifactVersionComparer.ListItem:
+				elif item_type is Pom.VersionComparer.ListItem:
 					return 1 # 1.1 > 1-1
 				else:
 					raise TypeError('Noncompareable type: %s' % type(item))
@@ -1031,11 +1031,11 @@ class Pom(object):
 				if item is None:
 					return cmp(self._cmp_qualifier(self.value), self.RELEASE_VERSION_INDEX) # 1-rc < 1, 1-ga > 1
 				item_type = type(item)
-				if item_type is Pom.ArtifactVersionComparer.IntegerItem:
+				if item_type is Pom.VersionComparer.IntegerItem:
 					return -1 # 1.any < 1.1 ?
-				if item_type is Pom.ArtifactVersionComparer.StringItem:
+				if item_type is Pom.VersionComparer.StringItem:
 					return cmp(self._cmp_qualifier(self.value), self._cmp_qualifier(item.value))
-				if item_type is Pom.ArtifactVersionComparer.ListItem:
+				if item_type is Pom.VersionComparer.ListItem:
 					return -1 # 1.any < 1.1
 				else:
 					raise TypeError('Noncompareable type: %s' % type(item))
@@ -1062,11 +1062,11 @@ class Pom(object):
 					else:
 						return self[0].compare_to(None)
 				item_type = type(item)
-				if item_type is Pom.ArtifactVersionComparer.IntegerItem:
+				if item_type is Pom.VersionComparer.IntegerItem:
 					return -1 # 1-1 < 1.0.x
-				if item_type is Pom.ArtifactVersionComparer.StringItem:
+				if item_type is Pom.VersionComparer.StringItem:
 					return 1 # 1-1 > 1-sp
-				if item_type is Pom.ArtifactVersionComparer.ListItem:
+				if item_type is Pom.VersionComparer.ListItem:
 					idx = 0
 					mlen = len(self)
 					olen = len(item)
@@ -1092,7 +1092,7 @@ class Pom(object):
 					item = self[idx]
 					if item.is_null:
 						del self[idx]
-					elif not isinstance(item, Pom.ArtifactVersionComparer.ListItem):
+					elif not isinstance(item, Pom.VersionComparer.ListItem):
 						break
 			
 			def __str__(self):
@@ -1103,7 +1103,7 @@ class Pom(object):
 					buf += str(item)
 				return buf
 	
-	class ArtifactVersionRange(object):
+	class VersionRange(object):
 		def __init__(self, recommended_version, restrictions):
 			self.__recommended_version = recommended_version
 			self.__restrictions = restrictions
@@ -1117,22 +1117,28 @@ class Pom(object):
 			return self.__restrictions
 		
 		@property
+		def has_restrictions(self):
+			return self.__restrictions is not None and len(self.__restrictions) > 0
+		
+		@property
 		def selected_version(self):
 			if self.__recommended_version is not None:
 				return self.__recommended_version
 			else:
 				if len(self.__restrictions) == 0:
-					raise Pom.ArtifactVersionException('The artifact has no valid ranges')
+					raise Pom.VersionException('No valid ranges found')
 			return None
 		
 		@property
 		def is_selected_version_known(self):
 			try:
 				return self.selected_version is not None
-			except Pom.ArtifactVersionException:
+			except Pom.VersionException:
 				return False
 		
 		def contains_version(self, version):
+			if not isinstance(version, Pom.ArtifactVersion):
+				version = Pom.ArtifactVersion(version)
 			for restriction in self.__restrictions:
 				if restriction.contains_version(version):
 					return True
@@ -1157,7 +1163,7 @@ class Pom(object):
 				version = self.__recommended_version
 			elif other.recommended_version is not None:
 				version = other.recommended_version
-			return Pom.ArtifactVersionRange(version, restrictions)
+			return Pom.VersionRange(version, restrictions)
 		
 		def _intersection(self, r1, r2):
 			restrictions = []
@@ -1206,9 +1212,9 @@ class Pom(object):
 								upper_inclusive = res2.upper_inclusive
 						# do not add if they are equal and one is not inclusive
 						if lower is None or upper is None or lower.compare_to(upper) != 0:
-							restrictions.append(Pom.ArtifactVersionRestriction(lower, lower_inclusive, upper, upper_inclusive))
+							restrictions.append(Pom.VersionRestriction(lower, lower_inclusive, upper, upper_inclusive))
 						elif lower_inclusive and upper_inclusive:
-							restrictions.append(Pom.ArtifactVersionRestriction(lower, lower_inclusive, upper, upper_inclusive))
+							restrictions.append(Pom.VersionRestriction(lower, lower_inclusive, upper, upper_inclusive))
 						
 						# no-inspection object equality
 						if upper == res2.upper_bound:
@@ -1235,7 +1241,7 @@ class Pom(object):
 		
 		@staticmethod
 		def create_from_version(version):
-			return Pom.ArtifactVersionRange(ArtifactVersion(version), [])
+			return Pom.VersionRange(ArtifactVersion(version), [])
 		
 		@staticmethod
 		def create_from_version_spec(spec):
@@ -1253,14 +1259,14 @@ class Pom(object):
 				if (idx < 0 or idx1 < idx2) and (idx1 >= 0):
 					idx = idx1
 				if idx < 0:
-					raise Pom.ArtifactVersionException('Unbounded range: ' + spec)
-				restriction = Pom.ArtifactVersionRange.parse_restriction(process[0:idx+1])
+					raise Pom.VersionException('Unbounded range: ' + spec)
+				restriction = Pom.VersionRange._parse_restriction(process[0:idx+1])
 				if lower_bound is None:
 					lower_bound = restriction.lower_bound
 				if upper_bound is not None:
 					lb = restriction.lower_bound
 					if  lb is None or lb.compare_to(upper_bound) < 0:
-						raise Pom.ArtifactVersionException('Ranges overlap: ' + spec)
+						raise Pom.VersionException('Ranges overlap: ' + spec)
 				restrictions.append(restriction)
 				upper_bound = restriction.upper_bound
 				process = process[idx + 1:].strip()
@@ -1268,34 +1274,34 @@ class Pom(object):
 					process = process[1:].strip()
 			if len(process) > 0:
 				if len(restrictions) > 0:
-					raise Pom.ArtifactVersionException('Only fully-qualified sets allowed in multiple set scenario: ' + spec)
+					raise Pom.VersionException('Only fully-qualified sets allowed in multiple set scenario: ' + spec)
 				else:
 					version = Pom.ArtifactVersion(process)
-					restrictions.append(Pom.ArtifactVersionRestriction.everything())
-			return Pom.ArtifactVersionRange(version, restrictions)
+					restrictions.append(Pom.VersionRestriction.allow_everything())
+			return Pom.VersionRange(version, restrictions)
 		
 		
 		@staticmethod
-		def parse_restriction(spec):
+		def _parse_restriction(spec):
 			lower_inclusive = spec.startswith('[')
 			upper_inclusive = spec.endswith(']')
 			process = spec[1:-1].strip()
 			idx = process.find(',')
 			if idx < 0:
 				if not lower_inclusive or not upper_inclusive:
-					raise Pom.ArtifactVersionException('Single version must be surrounded by []: ' + spec)
+					raise Pom.VersionException('Single version must be surrounded by []: ' + spec)
 				version = Pom.ArtifactVersion(process)
-				return Pom.ArtifactVersionRestriction(version, lower_inclusive, version, upper_inclusive)
+				return Pom.VersionRestriction(version, lower_inclusive, version, upper_inclusive)
 			else:
 				lower_bound = process[0:idx].strip()
 				upper_bound = process[idx+1:].strip()
 				if lower_bound == upper_bound:
-					raise Pom.ArtifactVersionException('Range cannot have identical boundries: ' + spec)
+					raise Pom.VersionException('Range cannot have identical boundries: ' + spec)
 				lower_version = Pom.ArtifactVersion(lower_bound) if len(lower_bound) > 0 else None
 				upper_version = Pom.ArtifactVersion(upper_bound) if len(upper_bound) > 0 else None
 				if upper_version is not None and lower_version is not None and upper_version.compare_to(lower_version) < 0:
-					raise Pom.ArtifactVersionException('Ranges defies version ordering: ' + spec)
-				return Pom.ArtifactVersionRestriction(lower_version, lower_inclusive, upper_version, upper_inclusive)
+					raise Pom.VersionException('Ranges defies version ordering: ' + spec)
+				return Pom.VersionRestriction(lower_version, lower_inclusive, upper_version, upper_inclusive)
 		
 		def __eq__(self, other):
 			if not isinstance(other, self.__class__):
@@ -1325,10 +1331,10 @@ class Pom(object):
 			else:
 				return ','.join(str(v) for v in self.__restrictions)
 	
-	class ArtifactVersionException(Exception):
+	class VersionException(Exception):
 		pass
 	
-	class ArtifactVersionRestriction(object):
+	class VersionRestriction(object):
 		def __init__(self, lower_bound, lower_inclusive, upper_bound, upper_inclusive):
 			self.__lower_bound = lower_bound
 			self.__lower_inclusive = lower_inclusive
@@ -1352,8 +1358,8 @@ class Pom(object):
 			return self.__upper_inclusive
 		
 		@staticmethod
-		def everything():
-			return Pom.ArtifactVersionRestriction(None, False, None, False)
+		def allow_everything():
+			return Pom.VersionRestriction(None, False, None, False)
 		
 		def contains_version(self, version):
 			if not isinstance(version, Pom.ArtifactVersion):
@@ -1926,7 +1932,7 @@ class Pom(object):
 			parent_properties = module.properties if module else None
 			properties = Pom.Properties.create(xprofile, None, parent_properties)
 			modules = Pom.Module.get_modules(pom_io, xprofile, module, depth + 1)
-			activation = Pom.Activation.parse(xprofile)
+			activation = Pom.ProfileActivation.parse(xprofile)
 			
 			return Pom.Profile(pom_io, name, properties, modules, activation, depth)
 		
@@ -1948,42 +1954,217 @@ class Pom(object):
 		def __repr__(self):
 			return "Pom.Profile(%s)" % str(self)
 	
-	class Activation(object):
-		def __init__(self, by_default, prop_name, prop_value):
-			self.by_default = by_default
-			self.prop_name = prop_name
-			self.prop_value = prop_value
+	class OS(object):
+		def __init__(self, name, family, arch, version):
+			self.__name = Pom.OS.get_valid_name(name)
+			self.__family = Pom.OS.get_valid_family(family)
+			if self.name is None and self.family == 'linux':
+				self.__family = None
+				self.__name = 'linux'
+			self.__arch = Pom.OS.get_valid_arch(arch)
+			self.__version = version
+		
+		@property
+		def name(self):
+			return self.__name
+		
+		@property
+		def family(self):
+			return self.__family
+		
+		@property
+		def arch(self):
+			return self.__arch
+		
+		@property
+		def version(self):
+			return self.__version
+		
+		@staticmethod
+		def get_valid_family(family):
+			if family is None:
+				return None
+			family = family.strip().lower()
+			if len(family) == 0:
+				return None
+			return family
+		
+		@staticmethod
+		def get_valid_name(name):
+			if name is None:
+				return None
+			name = name.strip().lower()
+			if len(name) == 0:
+				return None
+			rev = name.startswith('!')
+			if rev:
+				name = name[1:]
+			if name in ['gnu/linux']:
+				name = 'linux'
+			if rev:
+				name = '!' + name
+			return name
+		
+		@staticmethod
+		def get_valid_arch(arch):
+			if arch is None:
+				return None
+			arch = arch.strip().lower()
+			if len(arch) == 0:
+				return None
+			rev = arch.startswith('!')
+			if rev: 
+				arch = arch[1:]
+			if arch in ['i386', 'x86']:
+				arch = 'i386'
+			elif arch in ['amd64', 'x86_64', 'x64']:
+				arch = 'amd64'
+			else:
+				raise Exception('Unknown architecture: ' + arch)
+			if rev:
+				arch = '!' + arch
+			return arch
+		
+		@classmethod
+		def parse(cls, xnode):
+			xos = Pom.Xml.get_node(xnode, 'os')
+			if xos is None:
+				return None
+			name = Pom.Xml.get_child_node_value(xos, 'name', None)
+			family = Pom.Xml.get_child_node_value(xos, 'family', None)
+			arch = Pom.Xml.get_child_node_value(xos, 'arch', None)
+			version = Pom.Xml.get_child_node_value(xos, 'version', None)
+			if not name and not family and not arch and not version:
+				return None
+			return cls(name, family, arch, version)
+		
+		def __str__(self):
+			props = []
+			if self.family:
+				props.append('family={0}'.format(self.family))
+			if self.name:
+				props.append('name={0}'.format(self.name))
+			if self.family:
+				props.append('arch={0}'.format(self.arch))
+			if self.version:
+				props.append('version={0}'.format(self.version))
+			return ', '.join(props)
+		
+		def __eq__(self, other):
+			if not isinstance(other, self.__class__):
+				return False
+			if self.family != other.family:
+				return False
+			elif self.name != other.name:
+				return False
+			elif self.arch != other.arch:
+				return False
+			elif self.version != other.version:
+				return False
+			return True
+		
+		def __ne__(self, other):
+			return not self.__eq__(other)
 		
 		def __repr__(self):
-			return "%s(default=%s, property=%s:%s)" % (self.__class__, self.by_default, self.prop_name, self.prop_value)
+			return "{0}({1})".format(self.__class__.__name__, str(self))
 	
-		@staticmethod
-		def parse(xnode):
-			xactivation = xnode.find('{*}activation')
+	 
+	class ProfileActivation(object):
+		def __init__(self, by_default, jdk, os, property_name, property_value):
+			self.__by_default = by_default
+			if jdk is not None:
+				jdk = jdk.strip()
+			self.__jdk = jdk
+			self.__os = os
+			self.__property_name = property_name or None
+			if not property_name:
+				property_value = None
+			self.__property_value = property_value
+		
+		@property
+		def by_default(self):
+			return self.__by_default
+		
+		@property
+		def jdk(self):
+			return self.__jdk
+		
+		@property
+		def os(self):
+			return self.__os
+		
+		@property
+		def property_name(self):
+			return self.__property_name
+		
+		@property
+		def property_value(self):
+			return self.__property_value
+		
+		def match_properties(self, properties):
+			if self.property_name is None:
+				return True
+			if self.property_name not in properties:
+				return False
+			if self.property_value is None:
+				return True
+			return properties[self.property_name] == self.property_value 
+		
+		def match_jdk(self, jdk_version):
+			jdk = self.jdk
+			if jdk is None or len(jdk) == 0:
+				return True
+			if jdk.startswith('[') or jdk.startswith(')'):
+				try:
+					jdk_range = Pom.VersionRange.create_from_version_spec(jdk)
+					jdk_av = Pom.ArtifactVersion(jdk_version.replace('_', '-'))
+					return jdk_range.contains_version(jdk_av)
+				except VersionException as e:
+					raise VersionException('Invalid JDK version: ' + e.message)
+			rev = False
+			if jdk.startswith('!'):
+				rev = True
+				jdk = jdk[1:]
+			if jdk_version.startswith(jdk):
+				return not rev
+			else:
+				return rev
+		
+		def match_os(self, os):
+			if self.os is None:
+				return True
+			return self.os == os
+		
+		def __repr__(self):
+			props = []
+			if self.by_default:
+				props.append('default')
+			if self.property_name is not None:
+				prop = 'property={0}'.format(self.property_name)
+				if self.property_value is not None:
+					prop += ':{0}'.format(self.property_value)
+				props.append(prop)
+				if self.jdk is not None:
+					props.append('jdk={0}'.format(self.jdk))
+			return "{0}({1})".format(self.__class__.__name__, ', '.join(props))
+	
+		@classmethod
+		def parse(cls, xnode):
+			xactivation = Pom.Xml.get_node(xnode, 'activation')
 			if xactivation is None:
 				return None
-			act_by_default = False
-			act_prop_name = None
-			act_prop_value = None
-			
-			xbydef = xactivation.find('{*}activateByDefault')
-			if xbydef is not None:
-				if xbydef.text.strip().lower() == 'true':
-					act_by_default = True
-			xprop = xactivation.find('{*}property')
+			by_default = Pom.Xml.get_child_node_value(xactivation, 'activateByDefault', 'false').lower() == 'true'
+			jdk = Pom.Xml.get_child_node_value(xactivation, 'jdk', None)
+			os = Pom.OS.parse(xactivation)
+			xprop = Pom.Xml.get_node(xactivation, 'property')
 			if xprop is not None:
-				xprop_name = xprop.find('{*}name')
-				if xprop_name is not None:
-					prop_name = xprop_name.text.strip()
-					if len(prop_name) > 0:
-						act_prop_name = prop_name
-				xprop_value = xprop.find('{*}value')
-				if xprop_value is not None:
-					prop_value = xprop_value.text.strip()
-					if len(prop_value) > 0:
-						act_prop_value = prop_value
-			
-			return Pom.Activation(act_by_default, act_prop_name, act_prop_value)
+				property_name = Pom.Xml.get_child_node_value(xprop, 'name', '').strip() or None
+				property_value = Pom.Xml.get_child_node_value(xprop, 'value', '').strip() or None
+			else:
+				property_name = None
+				property_value = None
+			return cls(by_default, jdk, os, property_name, property_value)
 	
 	class BuildPath(object):
 		def __init__(self, profiles = set(), properties = {}):
@@ -2044,11 +2225,8 @@ class Pom(object):
 				a = p.activation
 				if a.by_default:
 					active = True
-				elif a.prop_name is not None and a.prop_name in self.properties:
-					if a.prop_value is None:
-						active = True
-					else:
-						active = self.properties[a.prop_name] == a.prop_value
+				elif a.match_properties(self.properties):
+					active = True
 			return active
 		
 		def clone(self):
@@ -2224,9 +2402,9 @@ class Pom(object):
 						b = buildpath.clone()
 						self._add_profile_path(profile, b.clone())
 						self._process(b, profile.modules, [])
-					elif activation.prop_name is not None:
+					elif activation.property_name is not None:
 						b = buildpath.clone()
-						b.properties[activation.prop_name] = activation.prop_value
+						b.properties[activation.property_name] = activation.property_value
 						self._add_profile_path(profile, b.clone())
 						self._process(b, profile.modules, [])
 				if by_name:

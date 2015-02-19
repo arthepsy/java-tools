@@ -156,7 +156,7 @@ class Test_ArtifactVersion(object):
 		assert mvn.Pom.ArtifactVersion(left).compare_to(mvn.Pom.ArtifactVersion(right)) == 0, left + " should be equal to " + right 
 		assert mvn.Pom.ArtifactVersion(right).compare_to(mvn.Pom.ArtifactVersion(left)) == 0, right + " should be equal to " + left 
 
-class Test_ArtifactVersionComparer(object):
+class Test_VersionComparer(object):
 	def test_versions_qualifier(self):
 		versions = ["1-alpha2snapshot", "1-alpha2", "1-alpha-123", "1-beta-2", "1-beta123", "1-m2", "1-m11", "1-rc", "1-cr2",
 		            "1-rc123", "1-SNAPSHOT", "1", "1-sp", "1-sp2", "1-sp123", "1-abc", "1-def", "1-pom-1", "1-1-snapshot",
@@ -254,15 +254,15 @@ class Test_ArtifactVersionComparer(object):
 		self.check_versions_order(a, c)
 	
 	def test_reuse(self):
-		c1 = mvn.Pom.ArtifactVersionComparer("1")
+		c1 = mvn.Pom.VersionComparer("1")
 		c1._parse("2")
-		c2 = mvn.Pom.ArtifactVersionComparer("2");
+		c2 = mvn.Pom.VersionComparer("2");
 		assert c1 == c2, "reused instance should be equivalent to new instance"
 	
 	def new_comparer(self, version):
-		ret = mvn.Pom.ArtifactVersionComparer(version)
+		ret = mvn.Pom.VersionComparer(version)
 		canonical = ret.canonical
-		parsed_canonical = mvn.Pom.ArtifactVersionComparer(canonical).canonical
+		parsed_canonical = mvn.Pom.VersionComparer(canonical).canonical
 		#print "canonical( " + version + " ) = " + canonical
 		assert canonical == parsed_canonical, "canonical( " + version + " ) = " + canonical + " -> canonical: " + parsedCanonical
 		return ret
@@ -294,7 +294,7 @@ class Test_ArtifactVersionComparer(object):
 				assert low.compare_to(high) < 0,  "expected " + low + " < " + high
 				assert high.compare_to(low) > 0,  "expected " + high + " > " + low
 
-class Test_ArtifactVersionRange(object):
+class Test_VersionRange(object):
 	CHECK_NUM_RESTRICTIONS = "check number of restrictions";
 	CHECK_UPPER_BOUND = "check upper bound";
 	CHECK_UPPER_BOUND_INCLUSIVE = "check upper bound is inclusive";
@@ -574,7 +574,7 @@ class Test_ArtifactVersionRange(object):
 		try:
 			self.create_from_version_spec(version)
 			pytest.fail("Version '" + version + "' should have failed to construct")
-		except mvn.Pom.ArtifactVersionException as e:
+		except mvn.Pom.VersionException as e:
 			return
 	
 	def ensure_artifact_version(self, version):
@@ -586,7 +586,7 @@ class Test_ArtifactVersionRange(object):
 			return mvn.Pom.ArtifactVersion(version)
 		
 	def single_range_test(self, spec, rlen, lower_bound, lower_inclusive, upper_bound, upper_inclusive, recommended_version, selected_know, selected_version, index=0):
-		if isinstance(spec, mvn.Pom.ArtifactVersionRange):
+		if isinstance(spec, mvn.Pom.VersionRange):
 			vr = spec
 		else:
 			vr = self.create_from_version_spec(spec)
@@ -603,7 +603,7 @@ class Test_ArtifactVersionRange(object):
 		assert vr.selected_version == self.ensure_artifact_version(selected_version), self.__class__.CHECK_SELECTED_VERSION + " (expected: {0}, got: {1})".format(selected_version, vr.selected_version)
 	
 	def create_from_version_spec(self, spec):
-		return mvn.Pom.ArtifactVersionRange.create_from_version_spec(spec)
+		return mvn.Pom.VersionRange.create_from_version_spec(spec)
 
 class Test_MirrorProcessor():
 	def test_external_url(self):
