@@ -29,6 +29,7 @@ import itertools
 import signal
 from lxml import etree
 import rfc3987
+import platform
 
 from inspect import getmembers
 from pprint import pprint
@@ -42,10 +43,29 @@ class Config(object):
 
 class Pom(object):
 	def __init__(self):
-		self.module_cache = {}
-		self.user_settings = Pom.UserSettings.create('~/.m2/settings.xml')
+		self.__module_cache = {}
+		self.__properties = Pom.Properties.create_root()
+		self.__global_settings = Pom.Settings.create('${env.M2_HOME}/conf/settings.xml', self.__properties)
+		self.__user_settings = Pom.Settings.create('${user.home}/.m2/settings.xml', self.__properties)
+		pprint(getmembers(self.__global_settings))
 	
-	class UserSettings(object):
+	@property
+	def properties(self):
+		return self.__properties
+	
+	@property
+	def module_cache(self):
+		return self.__module_cache
+	
+	@property
+	def global_settings(self):
+		return self.__global_settings
+	
+	@property
+	def user_settings(self):
+		return self.__user_settings
+	
+	class Settings(object):
 		def __init__(self):
 			self.__mirrors = Pom.Mirrors()
 			self.__profiles = {}
@@ -69,7 +89,8 @@ class Pom(object):
 				if profile_name in self.profiles:
 					yield self.profiles[profile_name]
 		 
-		def parse(self, file_path):
+		def parse(self, file_path, properties):
+			file_path = properties.expand_value(file_path)
 			io = Pom.IO(file_path)
 			if not os.path.isfile(io.file_path):
 				return
@@ -78,7 +99,7 @@ class Pom(object):
 			xroot = xtree.getroot()
 			if xroot is None:
 				return
-				
+			
 			self.__mirrors.fill(xroot)
 			self.__profiles = Pom.Profile.get_profiles(io, xroot, None)
 			for xnode in Pom.Xml.get_nodes(xroot, 'activeProfile', 'activeProfiles'):
@@ -87,9 +108,9 @@ class Pom(object):
 					self.__active_profile_names.add(profile_name)
 		
 		@classmethod
-		def create(cls, file_path):
+		def create(cls, file_path, properties):
 			o = cls()
-			o.parse(file_path)
+			o.parse(file_path, properties)
 			return o
 	
 	class Mirrors(list):
@@ -555,6 +576,19 @@ class Pom(object):
 			return "{0}('{1}')".format(self.__class__.__name__, self.file_path)
 	
 	class Properties(dict):
+		def __init__(self, *args, **kwargs):
+			dict.__init__(self, *args, **kwargs)
+			self.__parent = None
+			self.__internal = set()
+		
+		@property
+		def parent(self):
+			return self.__parent
+		
+		@property
+		def internal(self):
+			return self.__internal
+		
 		def _get_item_keys(self, value, ignore_list = None):
 			keys = set(re.findall('\${([^}]*)}', value))
 			if ignore_list is not None:
@@ -576,11 +610,26 @@ class Pom(object):
 					return True
 			return False
 		
+		def expand_value(self, value):
+			return self.expand_item(None, value)
+		
 		def expand_item(self, key=None, value=None):
 			self._expand_cache = {}
 			value = self._expand_item(key, value)
 			self._expand_cache = {}
 			return value
+		
+		def _get_value(self, key, cache = None):
+			if cache is not None:
+				value = cache.get(key, self.get(key))
+			else:
+				value = self.get(key)
+			if value is not None:
+				return value
+			if self.parent is not None:
+				return self.parent._get_value(key, cache)
+			else:
+				return None
 		
 		def _expand_item(self, key=None, value=None):
 			if key is None and value is None: 
@@ -588,10 +637,9 @@ class Pom(object):
 			stack = []
 			stack.append(key)
 			irreplaceable = set()
-			get_value = lambda k: self._expand_cache.get(k, self.get(k, None))
 			while True:
 				item_key = stack.pop()
-				item_value = value if item_key is None else get_value(item_key)
+				item_value = value if item_key is None else self._get_value(item_key, self._expand_cache)
 				if item_value is not None:
 					if self.expand_required(item_value):
 						replace_keys = self._get_item_keys(item_value)
@@ -600,7 +648,7 @@ class Pom(object):
 								replace_keys.remove(replace_key)
 								irreplaceable.add(replace_key)
 								continue
-							replace_value = get_value(replace_key)
+							replace_value = self._get_value(replace_key, self._expand_cache)
 							if replace_value is None:
 								replace_keys.remove(replace_key)
 								irreplaceable.add(replace_key)
@@ -617,11 +665,6 @@ class Pom(object):
 					break
 			return next((item for item in [item_value, key, value] if item is not None), '')
 		
-		#def expand_self(self):
-		#	self._expand_cache = {}
-		#	self._expand_self()
-		#	self._expand_cache = {}
-		
 		def _expand_self(self):
 			if not self.expand_required():
 				return
@@ -632,29 +675,10 @@ class Pom(object):
 				if self.expand_required(v):
 					self[k] = self._expand_item(k) 
 		
-		def expand_with(self, other_properties):
-			self._expand_cache = {}
-			self._expand_with(other_properties)
-			self._expand_cache = {}
-		
-		def _expand_with(self, other_properties):
-			if not hasattr(self, 'external'):
-				self.external = set()
-			updated = False
-			for k, v in other_properties.items():
-				if not k in self:
-					updated = True
-					self[k] = v
-					self.external.add(k)
-			if updated:
-				self._expand_self()
-		
 		def _add_build_properties(self, pom_io, xroot):
 			if pom_io is None:
 				return
 			self._expand_cache = {}
-			if not hasattr(self, 'internal'):
-				self.internal = set()
 			# initial
 			self['basedir'] = pom_io.dir_path
 			self['project.basedir'] = self['basedir']
@@ -699,8 +723,6 @@ class Pom(object):
 		
 		def _add_project_properties(self, xroot):
 			self._expand_cache = {}
-			if not hasattr(self, 'internal'):
-				self.internal = set()
 			# SuperPOM (artifact)
 			parent_tag = Pom.Xml.get_clean_tag(xroot)
 			if parent_tag == 'project':
@@ -716,36 +738,48 @@ class Pom(object):
 				self.internal.add('project.finalName')
 			self._expand_cache = {}
 		
-		def _add_session_properties(self, pom_io, parent_properties):
+		def _add_session_properties(self, pom_io):
 			self._expand_cache = {}
 			key = 'session.executionRootDirectory'
-			self.internal.add(key)
-			if key in parent_properties:
-				self[key] = parent_properties[key]
-			else:
-				if pom_io is not None:
-					self[key] = pom_io.dir_path
-				else:
-					self.internal.remove(key)
-			self._expand_cache = {}
+			value = None
+			if self.parent is not None:
+				value = self.parent._get_value(key)
+				if value is not None:
+					return
+			if pom_io is not None:
+				self.add_internal(key, pom_io.dir_path)
 		
-		def get_list(self, internal=False, external=False):
+		def add_internal(self, key, value):
+			self[key] = value
+			self.internal.add(key)
+		
+		def get_list(self, internal=False):
 			properties = {}
 			for k, v in self.items():
-				if not k in self.external and not k in self.internal:
+				if not k in self.internal:
 					properties[k] = v
 			return properties
 		
 		@classmethod
-		def create(cls, xroot, pom_io=None, parent_properties=None):
-			if parent_properties is None:
-				parent_properties = Pom.Properties()
+		def create_root(cls):
 			properties = cls()
-			properties.internal = set()
-			properties.external = set()
+			for k,v in os.environ.items():
+				properties.add_internal('env.' + k, v)
+			properties.add_internal('path.separator', os.sep)
+			properties.add_internal('user.home', Pom.Env.get_user_home())
+			properties.add_internal('user.name', Pom.Env.get_user_name())
+			properties.add_internal('os.arch', Pom.OS.get_system_arch())
+			properties.add_internal('os.name', Pom.OS.get_system_family())
+			properties.add_internal('os.version', Pom.OS.get_system_version())
+			return properties
+		
+		@classmethod
+		def create(cls, xroot, parent_properties=None, pom_io=None):
+			properties = cls()
+			properties.__parent = parent_properties
 			properties._add_build_properties(pom_io, xroot)
 			properties._add_project_properties(xroot)
-			properties._add_session_properties(pom_io, parent_properties)
+			properties._add_session_properties(pom_io)
 			xproperties = Pom.Xml.get_properties(xroot)
 			for xproperty in xproperties:
 				if xproperty.tag is etree.Comment:
@@ -755,7 +789,6 @@ class Pom(object):
 				properties[key] = value
 			properties._expand_cache = {}
 			properties._expand_self()
-			properties._expand_with(parent_properties)
 			properties._expand_cache = {}
 			return properties
 	
@@ -1528,7 +1561,7 @@ class Pom(object):
 			if full:
 				if len(self.classifier) > 0:
 					moduleId += self.packaging + ':' + self.classifier + ':'
-				elif self.packaging != 'jar':
+				elif self.packaging and self.packaging != 'jar':
 					moduleId += self.packaging + ':'
 			moduleId += self.version
 			return moduleId
@@ -1552,8 +1585,8 @@ class Pom(object):
 		def parse(xroot, origin=0, module=None):
 			origin = Pom.ArtifactOrigin.ensure(origin)
 			
-			properties = Pom.Inheritance.get_properties(module)
-			managed_dependencies = Pom.Inheritance.get_managed_dependencies(module)
+			properties = module.properties if module else Pom.Properties()
+			managed_dependencies = module.all_managed_dependencies if module else Pom.Dependencies()
 			
 			parent = None
 			parent_tag = Pom.Xml.get_clean_tag(xroot)
@@ -1561,7 +1594,7 @@ class Pom(object):
 				xparent = Pom.Xml.get_node(xroot, 'parent')
 				if xparent is not None:
 					parent = Pom.Artifact.parse(xparent, origin)
-			expand = lambda v: properties.expand_item(value=v) if properties.expand_required(v) else v
+			expand = lambda v: properties.expand_value(v) if properties.expand_required(v) else v
 			
 			artifactId = expand(Pom.Xml.get_artifact_id(xroot))
 			if len(artifactId) == 0:
@@ -1688,7 +1721,7 @@ class Pom(object):
 		@staticmethod
 		def parse(xnode, module = None):
 			artifact = Pom.Artifact.parse(xnode, Pom.ArtifactOrigin.DEPENDENCY, module)
-			managed_dependencies = Pom.Inheritance.get_managed_dependencies(module)
+			managed_dependencies = module.all_managed_dependencies if module else Pom.Dependencies()
 			deptype = Pom.Dependency._get_property(xnode, 'type', managed_dependencies, artifact, '')
 			scope = Pom.Dependency._get_property(xnode, 'scope', managed_dependencies, artifact, 'compile')
 			if scope not in ['compile', 'provided', 'runtime', 'test', 'system']:
@@ -1753,39 +1786,6 @@ class Pom(object):
 				pass
 			return weight
 	
-	class Inheritance(object):
-		@staticmethod
-		def get_properties(module):
-			properties = Pom.Properties()
-			if module is None or not isinstance(module, Pom.Module):
-				return properties
-			stack = []
-			parent = module.parent
-			while parent is not None:
-				stack.append(parent.properties)
-				parent = parent.parent
-			while stack:
-				properties.update(stack.pop())
-			if hasattr(module, 'properties'):
-				properties.update(module.properties)
-			return properties
-		
-		@staticmethod
-		def get_managed_dependencies(module):
-			dependencies = Pom.Dependencies()
-			if not isinstance(module, Pom.Module):
-				return dependencies
-			stack = []
-			parent = module.parent
-			while parent is not None:
-				stack.append(parent.dependencies.managed)
-				parent = parent.parent
-			while stack:
-				dependencies.update(stack.pop())
-			if hasattr(module, 'dependencies'):
-				dependencies.update(module.dependencies.managed)
-			return dependencies
-	
 	class Module(BuildWeight):
 		def __init__(self, pom_io, artifact, depth = 0):
 			super(self.__class__, self).__init__()
@@ -1797,6 +1797,19 @@ class Pom(object):
 			self.dependencies = Pom.Dependencies()
 			self.modules = {}
 			self.profiles = {}
+		
+		@property
+		def all_managed_dependencies(self):
+			dependencies = Pom.Dependencies()
+			stack = []
+			parent = self.parent
+			while parent is not None:
+				stack.append(parent.dependencies.managed)
+				parent = parent.parent
+			while stack:
+				dependencies.update(stack.pop())
+			dependencies.update(self.dependencies.managed)
+			return dependencies
 		
 		def show_graph(self, bgc = None, matched = False):
 			if bgc is None:
@@ -1862,8 +1875,8 @@ class Pom(object):
 				else:
 					module.parent = None
 			
-			parent_properties = module.parent.properties if module.parent else None
-			module.properties = Pom.Properties.create(xroot, pom_io, parent_properties)
+			parent_properties = module.parent.properties if module.parent else pom.properties
+			module.properties = Pom.Properties.create(xroot, parent_properties, pom_io)
 			
 			Pom.Dependencies.populate(module, xroot)
 			
@@ -1946,7 +1959,7 @@ class Pom(object):
 				return None
 			name = Pom.Xml.get_id(xprofile)
 			parent_properties = module.properties if module else None
-			properties = Pom.Properties.create(xprofile, None, parent_properties)
+			properties = Pom.Properties.create(xprofile, parent_properties)
 			modules = Pom.Module.get_modules(pom_io, xprofile, module, depth + 1)
 			activation = Pom.ProfileActivation.parse(xprofile)
 			
@@ -1972,12 +1985,12 @@ class Pom(object):
 	
 	class OS(object):
 		def __init__(self, name, family, arch, version):
-			self.__name = Pom.OS.get_valid_name(name)
-			self.__family = Pom.OS.get_valid_family(family)
+			self.__name = Pom.OS.unwrap_value(name, Pom.OS.get_valid_name)
+			self.__family = Pom.OS.unwrap_value(family, Pom.OS.get_valid_family)
 			if self.name is None and self.family == 'linux':
 				self.__family = None
 				self.__name = 'linux'
-			self.__arch = Pom.OS.get_valid_arch(arch)
+			self.__arch = Pom.OS.unwrap_value(arch, Pom.OS.get_valid_arch)
 			self.__version = version
 		
 		@property
@@ -1997,49 +2010,70 @@ class Pom(object):
 			return self.__version
 		
 		@staticmethod
+		def clean_value(value):
+			if value is None:
+				return None
+			value = value.strip().lower()
+			if len(value) == 0:
+				return None
+			return value
+		
+		@staticmethod
+		def unwrap_value(value, f):
+			value = Pom.OS.clean_value(value)
+			if value is None:
+				return None
+			rev = value.startswith('!')
+			if rev:
+				value = value[1:]
+			value = f(value)
+			if rev:
+				value = '!' + value
+			return value
+		
+		@staticmethod
 		def get_valid_family(family):
+			family = Pom.OS.clean_value(family)
 			if family is None:
 				return None
-			family = family.strip().lower()
-			if len(family) == 0:
-				return None
+			if family == 'darwin':
+				family = 'macos'
 			return family
 		
 		@staticmethod
 		def get_valid_name(name):
+			name = Pom.OS.clean_value(name)
 			if name is None:
 				return None
-			name = name.strip().lower()
-			if len(name) == 0:
-				return None
-			rev = name.startswith('!')
-			if rev:
-				name = name[1:]
 			if name in ['gnu/linux']:
 				name = 'linux'
-			if rev:
-				name = '!' + name
 			return name
 		
 		@staticmethod
 		def get_valid_arch(arch):
+			arch = Pom.OS.clean_value(arch)
 			if arch is None:
 				return None
-			arch = arch.strip().lower()
-			if len(arch) == 0:
-				return None
-			rev = arch.startswith('!')
-			if rev: 
-				arch = arch[1:]
-			if arch in ['i386', 'x86']:
+			if arch in ['i386', 'i486', 'i586', 'i686', 'x86']:
 				arch = 'i386'
 			elif arch in ['amd64', 'x86_64', 'x64']:
 				arch = 'amd64'
 			else:
-				raise Exception('Unknown architecture: ' + arch)
-			if rev:
-				arch = '!' + arch
+				if arch not in ['ppc', 'ppc64', 'ia64', 'sparc', 'sun4u', 'arm', 'mips', 'alpha']: 
+					raise Exception('Unknown architecture: ' + arch)
 			return arch
+		
+		@staticmethod
+		def get_system_arch():
+			return Pom.OS.get_valid_arch(platform.machine())
+		
+		@staticmethod
+		def get_system_family():
+			return Pom.OS.get_valid_family(platform.system())
+		
+		@staticmethod
+		def get_system_version():
+			return platform.release()
 		
 		@classmethod
 		def parse(cls, xnode):
@@ -2085,7 +2119,31 @@ class Pom(object):
 		def __repr__(self):
 			return "{0}({1})".format(self.__class__.__name__, str(self))
 	
-	 
+	class Env(object):
+		@staticmethod
+		def get_user_home():
+			if 'HOME' in os.environ:
+				home = os.environ['HOME']
+			elif os.name == 'posix':
+				home = os.path.expanduser("~")
+			elif os.name == 'nt':
+				if 'HOMEPATH' in os.environ and 'HOMEDRIVE' in os.environ:
+					home = os.path.join(os.environ['HOMEDRIVE'], os.environ['HOMEPATH'])
+			else:
+				home = os.environ['HOMEPATH']
+			if home.endswith(os.sep):
+				home = home[:-len(os.sep)]
+			return home
+		
+		@staticmethod
+		def get_user_name():
+			for name in ('LOGNAME', 'USER', 'LNAME', 'USERNAME'):
+				user = os.environ.get(name)
+				if user:
+					return user
+			import pwd
+			return pwd.getpwuid(os.getuid())[0]
+	
 	class ProfileActivation(object):
 		def __init__(self, by_default, jdk, os, property_name, property_value):
 			self.__by_default = by_default
