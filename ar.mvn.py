@@ -49,6 +49,7 @@ class Pom(object):
 		def __init__(self):
 			self.__mirrors = Pom.Mirrors()
 			self.__profiles = {}
+			self.__active_profile_names = set()
 		
 		@property
 		def mirrors(self):
@@ -57,6 +58,16 @@ class Pom(object):
 		@property
 		def profiles(self):
 			return self.__profiles
+		
+		@property
+		def active_profile_names(self):
+			return self.__active_profile_names
+		
+		@property
+		def active_profiles(self):
+			for profile_name in self.__active_profile_names:
+				if profile_name in self.profiles:
+					yield self.profiles[profile_name]
 		 
 		def parse(self, file_path):
 			io = Pom.IO(file_path)
@@ -67,8 +78,13 @@ class Pom(object):
 			xroot = xtree.getroot()
 			if xroot is None:
 				return
-			self.__profiles = Pom.Profile.get_profiles(io, xroot, None)
+				
 			self.__mirrors.fill(xroot)
+			self.__profiles = Pom.Profile.get_profiles(io, xroot, None)
+			for xnode in Pom.Xml.get_nodes(xroot, 'activeProfile', 'activeProfiles'):
+				profile_name = Pom.Xml.get_node_value(xnode, '')
+				if profile_name:
+					self.__active_profile_names.add(profile_name)
 		
 		@classmethod
 		def create(cls, file_path):
