@@ -605,5 +605,149 @@ class Test_ArtifactVersionRange(object):
 	def create_from_version_spec(self, spec):
 		return mvn.Pom.ArtifactVersionRange.create_from_version_spec(spec)
 
+class Test_MirrorProcessor():
+	def test_external_url(self):
+		assert True == self.create_repo("foo", "http://somehost").is_external
+		assert True == self.create_repo("foo", "http://somehost:9090/somepath").is_external
+		assert True == self.create_repo("foo", "ftp://somehost").is_external
+		assert True == self.create_repo("foo", "http://129.168.101.1").is_external
+		assert True == self.create_repo("foo", "http://").is_external
+		# local
+		assert False == self.create_repo("foo", "http://localhost:8080").is_external
+		assert False == self.create_repo("foo", "http://127.0.0.1:9090").is_external
+		assert False == self.create_repo("foo", "file://localhost/somepath").is_external
+		assert False == self.create_repo("foo", "file://localhost/D:/somepath").is_external
+		assert False == self.create_repo("foo", "http://localhost").is_external
+		assert False == self.create_repo("foo", "http://127.0.0.1").is_external
+		assert False == self.create_repo("foo", "file:///somepath").is_external
+		assert False == self.create_repo("foo", "file://D:/somepath").is_external
+		# not a proper url
+		assert False == self.create_repo("foo", "192.168.10.1").is_external
+		assert False == self.create_repo("foo", "").is_external
+	
+	def test_mirror_lookup(self):
+		mirror_a = self.create_mirror("a", "a", "http://a")
+		mirror_b = self.create_mirror("b", "b", "http://b")
+		mirrors = mvn.Pom.Mirrors([mirror_a, mirror_b])
+		assert mirror_a == mirrors.get_mirror(self.create_repo('a', 'http://a'))
+		assert mirror_b == mirrors.get_mirror(self.create_repo('b', 'http://b'))
+		assert None == mirrors.get_mirror(self.create_repo('c', 'http://c'))
+	
+	def test_mirror_wildcard(self):
+		mirror_a = self.create_mirror("a", "a", "http://a")
+		mirror_b = self.create_mirror("b", "b", "http://b")
+		mirror_c = self.create_mirror("c", "*", "http://c")
+		mirrors = mvn.Pom.Mirrors([mirror_a, mirror_b, mirror_c])
+		assert mirror_a == mirrors.get_mirror(self.create_repo('a', 'http://a'))
+		assert mirror_b == mirrors.get_mirror(self.create_repo('b', 'http://b'))
+		assert mirror_c == mirrors.get_mirror(self.create_repo('c', 'http://c'))
+	
+	def test_mirror_stop_on_first_match(self):
+		mirror_a2 = self.create_mirror("a2", "a2", "http://a2")
+		mirror_a = self.create_mirror("a", "a", "http://a")
+		mirror_a3 = self.create_mirror("a3", "a3", "http://b")
+		mirror_b = self.create_mirror("b", "b", "http://b")
+		mirror_c = self.create_mirror("c", "d,e", "http://de")
+		mirror_c2 = self.create_mirror("c", "*", "http://wildcard")
+		mirror_c3 = self.create_mirror("c", "e,f", "http://ef")
+		mirrors = mvn.Pom.Mirrors([mirror_a2, mirror_a, mirror_a3, mirror_b, mirror_c, mirror_c2, mirror_c3])
+		
+		assert mirror_a == mirrors.get_mirror(self.create_repo('a', 'http://a.a'))
+		assert mirror_b == mirrors.get_mirror(self.create_repo('b', 'http://b.b'))
+		assert mirror_c2 == mirrors.get_mirror(self.create_repo('c', 'http://c.c'))
+		assert mirror_c == mirrors.get_mirror(self.create_repo('d', 'http://d'))
+		assert mirror_c == mirrors.get_mirror(self.create_repo('e', 'http://e'))
+		assert mirror_c2 == mirrors.get_mirror(self.create_repo('f', 'http://f'))
+	
+	def test_patterns(self):
+		assert True == self.check_pattern('a', '*')
+		assert True == self.check_pattern('a', '*,')
+		assert True == self.check_pattern('a', ',*,')
+		assert True == self.check_pattern('a', '*,')
+		
+		assert True == self.check_pattern('a', 'a')
+		assert True == self.check_pattern('a', 'a,')
+		assert True == self.check_pattern('a', ',a')
+		assert True == self.check_pattern('a', ',a,')
+		
+		assert False == self.check_pattern('b', 'a')
+		assert False == self.check_pattern('b', 'a,')
+		assert False == self.check_pattern('b', ',a')
+		assert False == self.check_pattern('b', ',a,')
+		
+		assert True == self.check_pattern('a', 'a,b')
+		assert True == self.check_pattern('b', 'a,b')
+		assert False == self.check_pattern('c', 'a,b')
+		
+		assert True == self.check_pattern('a', '*')
+		assert True == self.check_pattern('a', '*,b')
+		assert True == self.check_pattern('a', '*,!b')
+		
+		assert False == self.check_pattern('a', '*,!a')
+		assert False == self.check_pattern('a', '!a,*')
+		
+		assert True == self.check_pattern('c', '*,!a')
+		assert True == self.check_pattern('c', '!a,*,')
+		
+		assert False == self.check_pattern('c', ',!a,!c')
+		assert False == self.check_pattern('d', ',!a,!c*')
+		
+	def test_patterns_with_external(self):
+		assert True == self.check_pattern('a', '*', 'http://localhost')
+		assert False == self.check_pattern('a', 'external:*', 'http://localhost')
+		
+		assert True == self.check_pattern('a', 'external:*,a', 'http://localhost')
+		assert False == self.check_pattern('a', 'external:*,!a', 'http://localhost')
+		assert True == self.check_pattern('a', 'a,external:*', 'http://localhost')
+		assert False == self.check_pattern('a', '!a,external:', 'http://localhost')
+		
+		assert False == self.check_pattern('c', '!a,external:*', 'http://localhost')
+		assert True == self.check_pattern('c', '!a,external:*', 'http://somehost')
+	
+	def test_layout_pattern(self):
+		assert True == self.check_layout('default', None)
+		assert True == self.check_layout('default', '')
+		assert True == self.check_layout('default', '*')
+		
+		assert True == self.check_layout('default', 'default')
+		assert False == self.check_layout('default', 'legacy')
+		
+		assert True == self.check_layout('default', 'legacy,default')
+		assert True == self.check_layout('default', 'default,legacy')
+	
+		assert False == self.check_layout('default', 'legacy,!default')
+		assert False == self.check_layout('default', '!default,legacy')
+		
+		assert False == self.check_layout('default', '*,!default')
+		assert False == self.check_layout('default', '!default,*')
+	
+	def test_mirror_layout_considered_for_matching(self):
+		repo = self.create_repo('a', 'a')
+		mirror_a = self.create_mirror('a', 'a', 'http://a', None)
+		mirror_b = self.create_mirror('b', 'b', 'http://b', 'p2')
+		mirror_c = self.create_mirror('c', '*', 'http://c', None)
+		mirror_d = self.create_mirror('d', '*', 'http://d', 'p2')
+		
+		assert mirror_a == mvn.Pom.Mirrors([mirror_a]).get_mirror(repo)
+		assert None == mvn.Pom.Mirrors([mirror_b]).get_mirror(repo)
+		assert mirror_c == mvn.Pom.Mirrors([mirror_c]).get_mirror(repo)
+		assert None == mvn.Pom.Mirrors([mirror_d]).get_mirror(repo)
+	
+	def check_layout(self, repository_layout, mirror_layouts):
+		mirror = self.create_mirror('test_mirror', '', '', mirror_layouts)
+		repository = self.create_repo('test_repo', '')
+		return mirror.match_layout(repository_layout)
+		
+	def check_pattern(self, repository_id, mirror_of, repository_url = ''):
+		mirror = self.create_mirror('test_mirror', mirror_of, '')
+		repository = self.create_repo(repository_id, repository_url)
+		return mirror.match_repository(repository)
+	
+	def create_mirror(self, mirror_id, mirror_of, mirror_url, mirror_layouts = None):
+		return mvn.Pom.Mirror(mirror_id, '', mirror_url, None, mirror_of, mirror_layouts)
+	
+	def create_repo(self, repo_id, repo_url, repo_layout=None):
+		return mvn.Pom.ArtifactRepository(repo_id, repo_url, repo_layout)
+
 if __name__ == '__main__':
 	pass

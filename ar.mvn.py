@@ -28,6 +28,7 @@ import click
 import itertools
 import signal
 from lxml import etree
+import rfc3987
 
 from inspect import getmembers
 from pprint import pprint
@@ -42,6 +43,200 @@ class Config(object):
 class Pom(object):
 	def __init__(self):
 		self.module_cache = {}
+		self.user_settings = Pom.UserSettings.create('~/.m2/settings.xml')
+	
+	class UserSettings(object):
+		def __init__(self):
+			self.__mirrors = Pom.Mirrors()
+			self.__profiles = {}
+		
+		@property
+		def mirrors(self):
+			return self.__mirrors
+		
+		@property
+		def profiles(self):
+			return self.__profiles
+		 
+		def parse(self, file_path):
+			io = Pom.IO(file_path)
+			if not os.path.isfile(io.file_path):
+				return
+			parser = etree.XMLParser(recover=True)
+			xtree = etree.parse(io.file_path, parser)
+			xroot = xtree.getroot()
+			if xroot is None:
+				return
+			self.__profiles = Pom.Profile.get_profiles(io, xroot, None)
+			self.__mirrors.fill(xroot)
+		
+		@classmethod
+		def create(cls, file_path):
+			o = cls()
+			o.parse(file_path)
+			return o
+	
+	class Mirrors(list):
+		def __init__(self, *args, **kwargs):
+			list.__init__(self, *args, **kwargs)
+		
+		def fill(self, xroot):
+			for xmirror in Pom.Xml.get_mirrors(xroot):
+				mirror = Pom.Mirror.parse(xmirror)
+				if mirror is None: continue
+				self.append(mirror)
+		
+		def get_mirror(self, repository):
+			for mirror in self:
+				if mirror.mirror_of == repository.id and mirror.match_layout(repository.layout):
+					return mirror
+			for mirror in self:
+				if mirror.match_repository(repository) and mirror.match_layout(repository.layout):
+					return mirror
+			return None
+		
+		@classmethod
+		def create(cls, xroot):
+			o = cls()
+			o.fill(xroot)
+			return o
+	
+	class Mirror(object):
+		VALID_LAYOUTS = ['default', 'legacy']
+		
+		def __init__(self, mirror_id, name, url, layout = None, mirror_of = None, mirror_layouts = None):
+			self.__id = mirror_id
+			self.__name = name
+			self.__url = url
+			self.__layout = layout or 'default'
+			self.__mirror_of = mirror_of or '*'
+			self.__mirror_layouts = mirror_layouts or 'default,legacy'
+		
+		@property
+		def id(self):
+			return self.__id
+		
+		@property
+		def name(self):
+			return self.__name
+		
+		@property
+		def url(self):
+			return self.__url
+		
+		@property
+		def layout(self):
+			return self.__layout
+		
+		@property
+		def mirror_of(self):
+			return self.__mirror_of
+		
+		@property
+		def mirror_layouts(self):
+			return self.__mirror_layouts
+		
+		def match_layout(self, mirror_layout):
+			if len(self.mirror_layouts) == 0 or mirror_layout == '*':
+				return True
+			if self.mirror_layouts == mirror_layout:
+				return True
+			matched = False
+			for layout in self.mirror_layouts.split(','):
+				layout = layout.strip()
+				if len(layout) > 1 and layout.startswith('!'):
+					if layout[1:] == mirror_layout:
+						return False
+				elif layout == mirror_layout:
+					matched = True
+				elif layout == '*':
+					matched = True
+			return matched
+		
+		def match_repository(self, repository):
+			if self.mirror_of == '*' or repository.id == self.mirror_of:
+				return True
+			matched = False
+			for mirror_repo in self.mirror_of.split(','):
+				mirror_repo = mirror_repo.strip()
+				if len(mirror_repo) > 1 and mirror_repo.startswith('!'):
+					if mirror_repo[1:] == repository.id:
+						return False
+				if mirror_repo == repository.id:
+					return True
+				elif repository.is_external and mirror_repo == 'external:*':
+					matched = True
+				elif mirror_repo == '*':
+					matched = True
+			return matched
+		
+		@classmethod
+		def parse(cls, xnode):
+			mirror_id = (Pom.Xml.get_child_node_value(xnode, 'id', '') or 'default').lower()
+			name = Pom.Xml.get_child_node_value(xnode, 'name', '')
+			url = Pom.Xml.get_child_node_value(xnode, 'url', '')
+			layout = Pom.Xml.get_child_node_value(xnode, 'layout', None)
+			mirror_of = Pom.Xml.get_child_node_value(xnode, 'mirrorOf', None)
+			mirror_layouts = Pom.Xml.get_child_node_value(xnode, 'mirrorOfLayouts', None)
+			mirror = cls(mirror_id, name, url, layout, mirror_of, mirror_layouts)
+			return mirror
+		
+		def __str__(self):
+			return self.url
+		
+		def __eq__(self, other):
+			if not isinstance(other, self.__class__):
+				return False
+			if self.id != other.id or self.url != other.url:
+				return False
+			elif self.layout != other.layout:
+				return False
+			elif self.mirror_of != other.mirror_of:
+				return False
+			elif self.mirror_layouts != other.mirror_layouts:
+				return False
+			return True
+		
+		def __ne__(self, other):
+			return not self.__eq__(other)
+		
+		#def __hash__(self):
+		#	TODO
+
+		def __repr__(self):
+			return "{0}(id='{1}', of='{2}', url={3}, name='{4}')".format(self.__class__.__name__, self.id, self.mirror_of, self.url, self.name)
+	
+	class ArtifactRepository(object):
+		def __init__(self, repository_id, url, layout=None):
+			self.__id = repository_id
+			self.__url = url
+			if layout is None:
+				layout = 'default'
+			self.__layout = layout
+		
+		@property
+		def id(self):
+			return self.__id
+		
+		@property
+		def url(self):
+			return self.__url
+		
+		@property
+		def layout(self):
+			return self.__layout
+		
+		@property
+		def is_external(self):
+			try:
+				d = rfc3987.parse(self.url, rule='URI')
+				if d['host'] == 'localhost' or d['host'] == '127.0.0.1':
+					return False
+				elif d['scheme'] == 'file':
+					return False
+				return True
+			except ValueError:
+				return False
 	
 	class BuildGraphConf(object):
 		def __init__(self, modules = None, profiles = None, level = 0):
@@ -280,7 +475,13 @@ class Pom(object):
 			return Pom.Xml.get_nodes(xnode, 'plugin', 'plugins')
 		
 		@staticmethod
+		def get_mirrors(xnode):
+			return Pom.Xml.get_nodes(xnode, 'mirror', 'mirrors')
+		
+		@staticmethod
 		def get_nodes(xnode, children_name=None, parent_name=None):
+			if xnode is None:
+				return []
 			if parent_name is not None and len(parent_name) > 0:
 				xparent = xnode.find("{*}" + parent_name)
 			else:
@@ -318,9 +519,10 @@ class Pom(object):
 			return re.sub('^({[^{]*})?[ \t]*(.*)$', '\\2', xnode.tag.strip())
 	
 	class IO(object):
-		def __init__(self, pom_file):
-			self.__file_path = os.path.abspath(pom_file)
-			self.__dir_path = os.path.abspath(os.path.dirname(pom_file))
+		def __init__(self, file_path):
+			file_path = os.path.expanduser(file_path)
+			self.__file_path = os.path.abspath(file_path)
+			self.__dir_path = os.path.abspath(os.path.dirname(file_path))
 		
 		@property
 		def file_path(self):
@@ -329,6 +531,12 @@ class Pom(object):
 		@property
 		def dir_path(self):
 			return self.__dir_path
+		
+		def __str__(self):
+			return self.file_path
+		
+		def __repr__(self):
+			return "{0}('{1}')".format(self.__class__.__name__, self.file_path)
 	
 	class Properties(dict):
 		def _get_item_keys(self, value, ignore_list = None):
@@ -495,11 +703,14 @@ class Pom(object):
 		def _add_session_properties(self, pom_io, parent_properties):
 			self._expand_cache = {}
 			key = 'session.executionRootDirectory'
+			self.internal.add(key)
 			if key in parent_properties:
-				self['session.executionRootDirectory'] = parent_properties[key]
+				self[key] = parent_properties[key]
 			else:
-				self['session.executionRootDirectory'] = pom_io.dir_path
-			self.internal.add('session.executionRootDirectory')
+				if pom_io is not None:
+					self[key] = pom_io.dir_path
+				else:
+					self.internal.remove(key)
 			self._expand_cache = {}
 		
 		def get_list(self, internal=False, external=False):
@@ -1474,13 +1685,6 @@ class Pom(object):
 			rest = ', '.join([i for i in rest if len(i) > 0])
 			if len(rest) > 0: rest = ', ' + rest
 			return "Pom.Dependency(%s, %s%s)" % (self.scope, self.artifact, rest)
-	
-	class LocalRepository(object):
-		def __init__(self, repository_path = None):
-			pass
-		
-		def contains(artifact):
-			pass
 	
 	class BuildWeight(object):
 		def __init__(self):
