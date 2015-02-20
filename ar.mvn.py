@@ -1706,7 +1706,7 @@ class Pom(object):
 			l = len(p)
 			clean = lambda v: None if v == '*' else v.strip()
 			if l == 1:
-				return {'artifactId': clean([0])}
+				return {'artifactId': clean(p[0])}
 			if 3 < l > 5:
 				return {}
 			if l >= 3:
