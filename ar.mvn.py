@@ -98,11 +98,11 @@ class Pom(object):
 			for profile_name in self.__active_profile_names:
 				if profile_name in self.profiles:
 					yield self.profiles[profile_name]
-		 
+		
 		def _set_defaults(self, properties):
 			if properties is None:
 				properties = Pom.Properties()
-			self.__local_repository = properties.expand_value('${user.home}/.m2.repository')
+			self.__local_repository = properties.expand_value('${user.home}/.m2/repository')
 			self.__defaults.add('local_repository')
 		
 		def merge(self, other):
