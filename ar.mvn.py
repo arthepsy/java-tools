@@ -1793,6 +1793,13 @@ class Pom(object):
 		def __init__(self):
 			self._wcache = {}
 		
+		@property
+		def depth(self):
+			if self.parent is None:
+				return 0
+			else:
+				return self.parent.depth + 1
+		
 		def get_self_weight(self):
 			if isinstance(self, Pom.Profile):
 				return 0.0001
@@ -1835,9 +1842,8 @@ class Pom(object):
 			return weight
 	
 	class Module(BuildWeight):
-		def __init__(self, pom_io, artifact, depth = 0):
+		def __init__(self, pom_io, artifact):
 			super(self.__class__, self).__init__()
-			self.depth = depth
 			self.io = pom_io
 			self.artifact = artifact
 			self.parent = None
@@ -1895,7 +1901,7 @@ class Pom(object):
 			return None
 		
 		@staticmethod
-		def create(pom_io, parent = None, depth = 0):
+		def create(pom_io, parent = None):
 			if not isinstance(pom_io, Pom.IO):
 				pom_io = Pom.IO(pom_io)
 			if not os.path.isfile(pom_io.file_path):
@@ -1912,7 +1918,7 @@ class Pom(object):
 			artifact = Pom.Artifact.parse(xroot, Pom.ArtifactOrigin.PROJECT)
 			if artifact is None:
 				return None
-			module = Pom.Module(pom_io, artifact, depth)
+			module = Pom.Module(pom_io, artifact)
 			pom.module_cache[pom_io.file_path] = module
 			
 			if parent is not None:
@@ -1928,12 +1934,12 @@ class Pom(object):
 			
 			Pom.Dependencies.populate(module, xroot)
 			
-			module.modules = Pom.Module.get_modules(pom_io, xroot, module, depth + 1)
-			module.profiles = Pom.Profile.get_profiles(pom_io, xroot, module, depth + 1)
+			module.modules = Pom.Module.get_modules(pom_io, xroot, module)
+			module.profiles = Pom.Profile.get_profiles(pom_io, xroot, module)
 			return module
 		
 		@staticmethod
-		def get_modules(pom_io, xroot, parent = None, depth = 0):
+		def get_modules(pom_io, xroot, parent = None):
 			modules = {}
 			for xmodule in Pom.Xml.get_modules(xroot):
 				module_name = xmodule.text.strip()
@@ -1942,12 +1948,12 @@ class Pom(object):
 				#modules[module_name] = None
 				if os.path.isdir(os.path.join(pom_io.dir_path, module_name)):
 					pom_file = os.path.join(pom_io.dir_path, module_name, 'pom.xml')
-					pom_module = Pom.Module.create(pom_file, parent, depth)
+					pom_module = Pom.Module.create(pom_file, parent)
 					if pom_module is not None:
 						modules[module_name] = pom_module
 				else:
 					pom_file = os.path.join(pom_io.dir_path, module_name)
-					pom_module = Pom.Module.create(pom_file, parent, depth)
+					pom_module = Pom.Module.create(pom_file, parent)
 					if pom_module is not None:
 						modules[module_name] = pom_module
 			return modules
@@ -1959,9 +1965,9 @@ class Pom(object):
 			return "Pom.Module(%s)" % str(self)
 	
 	class Profile(BuildWeight):
-		def __init__(self, pom_io, name, properties, modules, activation, depth = 0):
+		def __init__(self, pom_io, name, properties, modules, activation):
 			super(self.__class__, self).__init__()
-			self.__depth = depth
+			self.__depth = 0
 			self.__io = pom_io
 			self.__name = name
 			self.__properties = properties
@@ -2000,7 +2006,7 @@ class Pom(object):
 			Pom.BuildGraph.show(conf)
 		
 		@staticmethod
-		def create(pom_io, xprofile, module = None, depth = 0):
+		def create(pom_io, xprofile, module = None):
 			if not isinstance(pom_io, Pom.IO):
 				pom_io = Pom.IO(pom_io)
 			if not os.path.isfile(pom_io.file_path):
@@ -2008,19 +2014,20 @@ class Pom(object):
 			name = Pom.Xml.get_id(xprofile)
 			parent_properties = module.properties if module else None
 			properties = Pom.Properties.create(xprofile, parent_properties)
-			modules = Pom.Module.get_modules(pom_io, xprofile, module, depth + 1)
+			modules = Pom.Module.get_modules(pom_io, xprofile, module)
 			activation = Pom.ProfileActivation.parse(xprofile)
-			
-			return Pom.Profile(pom_io, name, properties, modules, activation, depth)
+			profile = Pom.Profile(pom_io, name, properties, modules, activation)
+			profile.__depth = (module.depth if module else 0) + 1
+			return profile
 		
 		@staticmethod
-		def get_profiles(pom_io, xroot, module = None, depth = 0):
+		def get_profiles(pom_io, xroot, module = None):
 			profiles = {}
 			for xprofile in Pom.Xml.get_profiles(xroot):
 				profile_name = Pom.Xml.get_id(xprofile)
 				if len(profile_name) == 0: continue
 				if profile_name in profiles: continue
-				profile = Pom.Profile.create(pom_io, xprofile, module, depth)
+				profile = Pom.Profile.create(pom_io, xprofile, module)
 				if profile is None: continue
 				profiles[profile_name] = profile 
 			return profiles
