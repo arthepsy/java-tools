@@ -1844,13 +1844,41 @@ class Pom(object):
 	class Module(BuildWeight):
 		def __init__(self, pom_io, artifact):
 			super(self.__class__, self).__init__()
-			self.io = pom_io
-			self.artifact = artifact
-			self.parent = None
-			self.properties = Pom.Properties()
-			self.dependencies = Pom.Dependencies()
-			self.modules = {}
-			self.profiles = {}
+			self.__io = pom_io
+			self.__artifact = artifact
+			self.__parent = None
+			self.__properties = Pom.Properties()
+			self.__dependencies = Pom.Dependencies()
+			self.__modules = {}
+			self.__profiles = {}
+		
+		@property
+		def io(self):
+			return self.__io
+		
+		@property
+		def artifact(self):
+			return self.__artifact
+		
+		@property
+		def parent(self):
+			return self.__parent
+		
+		@property
+		def properties(self):
+			return self.__properties
+		
+		@property
+		def dependencies(self):
+			return self.__dependencies
+		
+		@property
+		def modules(self):
+			return self.__modules
+		
+		@property
+		def profiles(self):
+			return self.__profiles
 		
 		@property
 		def all_managed_dependencies(self):
@@ -1922,20 +1950,20 @@ class Pom(object):
 			pom.module_cache[pom_io.file_path] = module
 			
 			if parent is not None:
-				module.parent = parent
+				module.__parent = parent
 			else:
 				if artifact.parent is not None:
-					module.parent = Pom.Module._parse_parent(xroot, pom_io, artifact)
+					module.__parent = Pom.Module._parse_parent(xroot, pom_io, artifact)
 				else:
-					module.parent = None
+					module.__parent = None
 			
 			parent_properties = module.parent.properties if module.parent else pom.properties
-			module.properties = Pom.Properties.create(xroot, parent_properties, pom_io)
+			module.__properties = Pom.Properties.create(xroot, parent_properties, pom_io)
 			
 			Pom.Dependencies.populate(module, xroot)
 			
-			module.modules = Pom.Module.get_modules(pom_io, xroot, module)
-			module.profiles = Pom.Profile.get_profiles(pom_io, xroot, module)
+			module.__modules = Pom.Module.get_modules(pom_io, xroot, module)
+			module.__profiles = Pom.Profile.get_profiles(pom_io, xroot, module)
 			return module
 		
 		@staticmethod
