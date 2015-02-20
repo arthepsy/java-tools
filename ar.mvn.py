@@ -284,6 +284,25 @@ class Pom(object):
 		def __repr__(self):
 			return "{0}(id='{1}', of='{2}', url={3}, name='{4}')".format(self.__class__.__name__, self.id, self.mirror_of, self.url, self.name)
 	
+	class ArtifactRepositories(dict):
+		def __init__(self, *args, **kwargs):
+			dict.__init__(self, *args, **kwargs)
+		
+		def add(self, repository):
+			self[repository.id] = repository
+		
+		@classmethod
+		def create(cls, xroot, plugins=False):
+			repositories = cls()
+			parent_name = 'pluginRepositories' if plugins else 'repositories'
+			child_name = 'pluginRepository' if plugins else 'repository'
+			for xrepository in Pom.Xml.get_nodes(xroot, child_name, parent_name):
+				repository = Pom.ArtifactRepository.create(xrepository)
+				if repository is None: 
+					continue
+				repositories.add(repository) 
+			return repositories
+	
 	class ArtifactRepository(object):
 		def __init__(self, repository_id, url, layout=None):
 			self.__id = repository_id
@@ -291,6 +310,10 @@ class Pom(object):
 			if layout is None:
 				layout = 'default'
 			self.__layout = layout
+			self.__name = ''
+			self.__default_policy = Pom.RepositoryPolicy()
+			self.__releases = self.__default_policy
+			self.__snapshots = self.__default_policy
 		
 		@property
 		def id(self):
@@ -305,6 +328,18 @@ class Pom(object):
 			return self.__layout
 		
 		@property
+		def name(self):
+			return self.__name
+		
+		@property
+		def releases(self):
+			return self.__releases
+		
+		@property
+		def snapshots(self):
+			return self.__snapshots
+		
+		@property
 		def is_external(self):
 			try:
 				d = rfc3987.parse(self.url, rule='URI')
@@ -315,6 +350,96 @@ class Pom(object):
 				return True
 			except ValueError:
 				return False
+		
+		@classmethod
+		def create(cls, xrepository):
+			repository_id = Pom.Xml.get_id(xrepository)
+			if len(repository_id) == 0: 
+				return None
+			url = Pom.Xml.get_child_node_value(xrepository, 'url', '')
+			layout = Pom.Xml.get_child_node_value(xrepository, 'layout', None)
+			repository = cls(repository_id, url, layout)
+			repository.__name = Pom.Xml.get_child_node_value(xrepository, 'name', '')
+			repository.__releases = Pom.RepositoryPolicy.create(Pom.Xml.get_node(xrepository, 'releases'))
+			repository.__snapshots = Pom.RepositoryPolicy.create(Pom.Xml.get_node(xrepository, 'snapshots'))
+			return repository
+		
+		def __str__(self):
+			out = 'id={0}, url={1}, layout={2}'.format(self.id, self.url, self.layout)
+			if self.releases != self.__default_policy:
+				out += ', releases={0}'.format(self.releases)
+			if self.snapshots != self.__default_policy:
+				out += ', snapshots={0}'.format(self.snapshots)
+			return out
+		
+		def __repr__(self):
+			return '{0}({1})'.format(self.__class__.__name__, str(self))
+	
+	class RepositoryPolicy(object):
+		def __init__(self):
+			self.__enabled = True
+			self.__update_policy = 'daily'
+			self.__checksum_policy = 'warn'
+		
+		@property
+		def enabled(self):
+			return self.__enabled
+		
+		@property
+		def update_policy(self):
+			return self.__update_policy
+		
+		@property
+		def checksum_policy(self):
+			return self.__checksum_policy
+		
+		@classmethod
+		def create(cls, xnode):
+			policy = cls()
+			if xnode is None:
+				return policy
+			value = Pom.Xml.get_child_node_value(xnode, 'enabled', None)
+			if value is not None:
+				policy.__enabled = value.lower() == 'true'
+			value = Pom.Xml.get_child_node_value(xnode, 'updatePolicy', None)
+			if value is not None:
+				value = value.lower()
+				if value.startswith('interval:') or value in ['always', 'daily', 'never']:
+					policy.__update_policy = value
+			value = Pom.Xml.get_child_node_value(xnode, 'checksumPolicy', None)
+			if value is not None:
+				value = value.lower()
+				if value in ['ignore', 'fail', 'warn']:
+					policy.__checksum_policy = value
+			return policy
+			
+		def __str__(self):
+			out = 'enabled={0}, checksums={1}, updates={2}'.format(self.enabled, self.checksum_policy, self.update_policy)
+			return '{' + out + '}' 
+		
+		def __eq__(self, other):
+			if not isinstance(other, self.__class__):
+				return False
+			if self.enabled != other.enabled:
+				return False
+			if self.update_policy != other.update_policy:
+				return False
+			if self.checksum_policy != other.checksum_policy:
+				return False
+			return True
+		
+		def __ne__(self, other):
+			return not self.__eq__(other)
+		
+		def __hash__(self):
+			value = 3
+			value = 19 * value + hash(self.enabled)
+			value = 19 * value + hash(self.update_policy)
+			value = 19 * value + hash(self.checksum_policy)
+			return value
+		
+		def __repr__(self):
+			return '{0}({1})'.format(self.__class__.__name__, str(self))
 	
 	class BuildGraphConf(object):
 		def __init__(self, modules = None, profiles = None, level = 0):
@@ -571,6 +696,15 @@ class Pom(object):
 					return xparent.iterchildren("{*}" + children_name)
 			else:
 				return []
+		
+		@staticmethod
+		def get_root_node(xnode):
+			if xnode is None:
+				return None
+			parent = xnode
+			while parent.getparent() is not None:
+				parent = parent.getparent()
+			return parent
 		
 		@staticmethod
 		def get_node(xnode, child_name):
@@ -2021,7 +2155,7 @@ class Pom(object):
 			return profiles
 	
 	class Profile(BuildWeight):
-		def __init__(self, pom_io, name, properties, modules, activation):
+		def __init__(self, pom_io, name, properties, modules, activation, repositories, plugin_repositories):
 			super(self.__class__, self).__init__()
 			self.__depth = 0
 			self.__io = pom_io
@@ -2029,6 +2163,8 @@ class Pom(object):
 			self.__properties = properties
 			self.__modules = modules
 			self.__activation = activation
+			self.__repositories = repositories
+			self.__plugin_repositories = plugin_repositories
 		
 		@property
 		def depth(self):
@@ -2054,6 +2190,14 @@ class Pom(object):
 		def activation(self):
 			return self.__activation
 		
+		@property
+		def repositories(self):
+			return self.__repositories
+		
+		@property
+		def plugin_repositories(self):
+			return self.__plugin_repositories
+		
 		def show_graph(self, bgc = None, matched = False):
 			if bgc is None:
 				bgc = Pom.BuildGraphConf()
@@ -2072,7 +2216,14 @@ class Pom(object):
 			properties = Pom.Properties.create(xprofile, parent_properties)
 			modules = Pom.Modules.create(pom_io, xprofile, module)
 			activation = Pom.ProfileActivation.parse(xprofile)
-			profile = Pom.Profile(pom_io, name, properties, modules, activation)
+			root_tag = Pom.Xml.get_clean_tag(Pom.Xml.get_root_node(xprofile))
+			if root_tag == 'settings':
+				repositories = Pom.ArtifactRepositories.create(xprofile, False)
+				plugin_repositories = Pom.ArtifactRepositories.create(xprofile, True)
+			else:
+				repositories = None
+				plugin_repositories = None
+			profile = Pom.Profile(pom_io, name, properties, modules, activation, repositories, plugin_repositories)
 			profile.__depth = (module.depth if module else 0) + 1
 			return profile
 		
