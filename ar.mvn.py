@@ -47,7 +47,7 @@ class Pom(object):
 		self.__properties = Pom.Properties.create_root()
 		self.__global_settings = Pom.Settings.create('${env.M2_HOME}/conf/settings.xml', self.__properties)
 		self.__user_settings = Pom.Settings.create('${user.home}/.m2/settings.xml', self.__properties)
-		pprint(getmembers(self.__global_settings))
+		self.__user_settings.merge(self.__global_settings)
 	
 	@property
 	def properties(self):
@@ -66,10 +66,20 @@ class Pom(object):
 		return self.__user_settings
 	
 	class Settings(object):
-		def __init__(self):
+		def __init__(self, properties):
+			self.__defaults = set()
+			self._set_defaults(properties)
 			self.__mirrors = Pom.Mirrors()
 			self.__profiles = {}
 			self.__active_profile_names = set()
+		
+		@property
+		def defaults(self):
+			return self.__defaults
+		
+		@property
+		def local_repository(self):
+			return self.__local_repository
 		
 		@property
 		def mirrors(self):
@@ -89,6 +99,33 @@ class Pom(object):
 				if profile_name in self.profiles:
 					yield self.profiles[profile_name]
 		 
+		def _set_defaults(self, properties):
+			if properties is None:
+				properties = Pom.Properties()
+			self.__local_repository = properties.expand_value('${user.home}/.m2.repository')
+			self.__defaults.add('local_repository')
+		
+		def merge(self, other):
+			if other is None:
+				return
+			key = 'local_repository'
+			if key in self.defaults:
+				if not key in other.defaults:
+					self.__local_repository = other.local_repository
+					self.defaults.remove('local_repository')
+			if len(other.mirrors) > 0:
+				mirrors = Pom.Mirrors()
+				for mirror in other.mirrors:
+					mirrors.append(mirror)
+				for mirror in self.mirrors:
+					mirrors.append(mirror)
+				self.__mirrors = mirrors
+			for profile in other.profiles:
+				if profile.name not in self.profiles:
+					self.profiles[profile.name] = profile
+			for active_profile_name in other.active_profile_names:
+				self.__active_profile_names.add(active_profile_name)
+		
 		def parse(self, file_path, properties):
 			file_path = properties.expand_value(file_path)
 			io = Pom.IO(file_path)
@@ -106,10 +143,14 @@ class Pom(object):
 				profile_name = Pom.Xml.get_node_value(xnode, '')
 				if profile_name:
 					self.__active_profile_names.add(profile_name)
+			value = Pom.Xml.get_child_node_value(xroot, 'localRepository', None)
+			if value is not None and len(value) > 0:
+				self.__local_repository = value
+				self.defaults.remove('local_repository')
 		
 		@classmethod
 		def create(cls, file_path, properties):
-			o = cls()
+			o = cls(properties)
 			o.parse(file_path, properties)
 			return o
 	
@@ -765,12 +806,19 @@ class Pom(object):
 			properties = cls()
 			for k,v in os.environ.items():
 				properties.add_internal('env.' + k, v)
-			properties.add_internal('path.separator', os.sep)
-			properties.add_internal('user.home', Pom.Env.get_user_home())
-			properties.add_internal('user.name', Pom.Env.get_user_name())
+			if not 'env.M2_HOME' in properties:
+				m2_home = Pom.Env.get_maven_home()
+				if m2_home is not None:
+					properties['env.M2_HOME'] = m2_home
+			
+			properties.add_internal('file.separator', os.sep)
+			# TODO: java.home, java.vendor, java.vendor.url, java.version, java.class.path
+			#       line.separator, path.separator
 			properties.add_internal('os.arch', Pom.OS.get_system_arch())
 			properties.add_internal('os.name', Pom.OS.get_system_family())
 			properties.add_internal('os.version', Pom.OS.get_system_version())
+			properties.add_internal('user.home', Pom.Env.get_user_home())
+			properties.add_internal('user.name', Pom.Env.get_user_name())
 			return properties
 		
 		@classmethod
@@ -2121,6 +2169,23 @@ class Pom(object):
 	
 	class Env(object):
 		@staticmethod
+		def which(name, flags=os.X_OK):
+			result = []
+			exts = filter(None, os.environ.get('PATHEXT', '').split(os.pathsep))
+			path = os.environ.get('PATH', None)
+			if path is None:
+				return []
+			for p in os.environ.get('PATH', '').split(os.pathsep):
+				p = os.path.join(p, name)
+				if os.access(p, flags):
+					result.append(p)
+				for e in exts:
+					pext = p + e
+					if os.access(pext, flags):
+						result.append(pext)
+			return result
+		
+		@staticmethod
 		def get_user_home():
 			if 'HOME' in os.environ:
 				home = os.environ['HOME']
@@ -2143,6 +2208,24 @@ class Pom(object):
 					return user
 			import pwd
 			return pwd.getpwuid(os.getuid())[0]
+		
+		@staticmethod
+		def get_maven_home():
+			if 'M2_HOME' in os.environ:
+				return os.environ['M2_HOME']
+			mvn = None
+			if 'M2' in os.environ:
+				mvn = os.path.join(os.environ['M2'], 'mvn')
+			else:
+				mvns = Pom.Env.which('mvn')
+				if len(mvns) > 0:
+					mvn = mvns[0]
+			if os.path.isfile(mvn):
+				m2_home = os.path.abspath(os.path.join(mvn, '..', '..'))
+				m2_conf = os.path.join(m2_home, 'conf', 'settings.xml')
+				if not os.path.isfile(m2_conf):
+					m2_home = None
+			return m2_home
 	
 	class ProfileActivation(object):
 		def __init__(self, by_default, jdk, os, property_name, property_value):
