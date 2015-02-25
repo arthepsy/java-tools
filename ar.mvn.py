@@ -2030,9 +2030,17 @@ class Pom(object):
 			if len(rest) > 0: rest = ', ' + rest
 			return "Pom.Dependency(%s, %s%s)" % (self.scope, self.artifact, rest)
 	
-	class BuildWeight(object):
+	class BuildNode(object):
 		def __init__(self):
-			self._wcache = {}
+			self.__weight_cache = {}
+			self.__properties = Pom.Properties()
+			self.__repositories = Pom.ArtifactRepositories()
+			self.__plugin_repositories = Pom.ArtifactRepositories()
+			self.__modules = Pom.Modules()
+		
+		@property
+		def pure_weight(self):
+			raise NotImplementedError("{0}.{1}".format(self.__class__.__name__, 'pure_weight'))
 		
 		@property
 		def depth(self):
@@ -2041,18 +2049,36 @@ class Pom(object):
 			else:
 				return self.parent.depth + 1
 		
-		def get_self_weight(self):
-			if isinstance(self, Pom.Profile):
-				return 0.0001
-			elif isinstance(self, Pom.Module):
-				return 1.0000
-			else:
-				return 0.0000
+		@property
+		def properties(self):
+			return self.__properties
+		
+		@property
+		def repositories(self):
+			return self.__repositories
+		
+		@property
+		def plugin_repositories(self):
+			return self.__plugin_repositories
+		
+		@property
+		def modules(self):
+			return self.__modules
+		
+		def _set_properties(self, properties):
+			self.__properties = properties
+		
+		def _set_repositories(self, repositories, plugin_repositories):
+			self.__repositories = repositories
+			self.__plugin_repositories = plugin_repositories
+		
+		def _set_modules(self, modules):
+			self.__modules = modules
 		
 		def get_weight(self, bp = None, artifacts = None, level = 0):
-			if bp not in self._wcache:
-				self._wcache[bp] = self._get_weight(bp)
-			return self._wcache[bp]
+			if bp not in self.__weight_cache:
+				self.__weight_cache[bp] = self._get_weight(bp)
+			return self.__weight_cache[bp]
 		
 		def _get_weight(self, bp = None, artifacts = None, level = 0):
 			if artifacts is None:
@@ -2071,7 +2097,7 @@ class Pom(object):
 						subweight += p._get_weight(bp, artifacts, level + 1)
 			except (AttributeError, TypeError):
 				pass
-			weight = self.get_self_weight() + subweight
+			weight = self.pure_weight + subweight
 			try:
 				a = self.artifact
 				if a in artifacts:
@@ -2108,18 +2134,18 @@ class Pom(object):
 						modules[module_name] = pom_module
 			return modules
 	
-	class Module(BuildWeight):
+	class Module(BuildNode):
 		def __init__(self, pom_io, artifact):
 			super(self.__class__, self).__init__()
 			self.__io = pom_io
 			self.__artifact = artifact
 			self.__parent = None
-			self.__properties = Pom.Properties()
 			self.__dependencies = Pom.Dependencies()
-			self.__modules = Pom.Modules()
 			self.__profiles = Pom.Profiles()
-			self.__repositories = Pom.ArtifactRepositories()
-			self.__plugin_repositories = Pom.ArtifactRepositories()
+		
+		@property
+		def pure_weight(self):
+			return 1.0000
 		
 		@property
 		def io(self):
@@ -2134,16 +2160,8 @@ class Pom(object):
 			return self.__parent
 		
 		@property
-		def properties(self):
-			return self.__properties
-		
-		@property
 		def dependencies(self):
 			return self.__dependencies
-		
-		@property
-		def modules(self):
-			return self.__modules
 		
 		@property
 		def profiles(self):
@@ -2161,18 +2179,6 @@ class Pom(object):
 				dependencies.update(stack.pop())
 			dependencies.update(self.dependencies.managed)
 			return dependencies
-		
-		@property
-		def repositories(self):
-			return self.__repositories
-		
-		@property
-		def plugin_repositories(self):
-			return self.__plugin_repositories
-		
-		def update_repositories(self, repositories, plugin_repositories):
-			self.__repositories = repositories
-			self.__plugin_repositories = plugin_repositories
 		
 		def show_graph(self, bgc = None, matched = False):
 			if bgc is None:
@@ -2239,13 +2245,17 @@ class Pom(object):
 					module.__parent = None
 			
 			parent_properties = module.parent.properties if module.parent else pom.properties
-			module.__properties = Pom.Properties.create(xroot, parent_properties, pom_io)
+			properties = Pom.Properties.create(xroot, parent_properties, pom_io)
+			module._set_properties(properties)
+			
 			repositories = Pom.ArtifactRepositories.create(xroot, False)
 			plugin_repositories = Pom.ArtifactRepositories.create(xroot, True)
-			module.update_repositories(repositories, plugin_repositories)
+			module._set_repositories(repositories, plugin_repositories)
+			
 			Pom.Dependencies.populate(module, xroot)
 			
-			module.__modules = Pom.Modules.create(pom_io, xroot, module)
+			modules = Pom.Modules.create(pom_io, xroot, module)
+			module._set_modules(modules)
 			module.__profiles = Pom.Profiles.create(pom_io, xroot, module)
 			return module
 		
@@ -2277,17 +2287,18 @@ class Pom(object):
 				profiles.add(profile) 
 			return profiles
 	
-	class Profile(BuildWeight):
-		def __init__(self, pom_io, name, properties, modules, activation):
+	class Profile(BuildNode):
+		def __init__(self, pom_io, name, properties, activation):
 			super(self.__class__, self).__init__()
 			self.__depth = 0
 			self.__io = pom_io
 			self.__name = name
-			self.__properties = properties
-			self.__modules = modules
+			self._set_properties(properties)
 			self.__activation = activation
-			self.__repositories = Pom.ArtifactRepositories()
-			self.__plugin_repositories = Pom.ArtifactRepositories()
+		
+		@property
+		def pure_weight(self):
+			return 0.0001
 		
 		@property
 		def depth(self):
@@ -2302,28 +2313,8 @@ class Pom(object):
 			return self.__name
 		
 		@property
-		def properties(self):
-			return self.__properties
-		
-		@property
-		def modules(self):
-			return self.__modules
-		
-		@property
 		def activation(self):
 			return self.__activation
-		
-		@property
-		def repositories(self):
-			return self.__repositories
-		
-		@property
-		def plugin_repositories(self):
-			return self.__plugin_repositories
-		
-		def update_repositories(self, repositories, plugin_repositories):
-			self.__repositories = repositories
-			self.__plugin_repositories = plugin_repositories
 		
 		def show_graph(self, bgc = None, matched = False):
 			if bgc is None:
@@ -2341,12 +2332,16 @@ class Pom(object):
 			name = Pom.Xml.get_id(xprofile)
 			parent_properties = module.properties if module else None
 			properties = Pom.Properties.create(xprofile, parent_properties)
-			modules = Pom.Modules.create(pom_io, xprofile, module)
 			activation = Pom.ProfileActivation.parse(xprofile)
+			profile = Pom.Profile(pom_io, name, properties, activation)
+			
 			repositories = Pom.ArtifactRepositories.create(xprofile, False)
 			plugin_repositories = Pom.ArtifactRepositories.create(xprofile, True)
-			profile = Pom.Profile(pom_io, name, properties, modules, activation)
-			profile.update_repositories(repositories, plugin_repositories)
+			profile._set_repositories(repositories, plugin_repositories)
+			
+			modules = Pom.Modules.create(pom_io, xprofile, module)
+			profile._set_modules(modules)
+			
 			profile.__depth = (module.depth if module else 0) + 1
 			return profile
 		
