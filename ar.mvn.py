@@ -45,9 +45,15 @@ class Pom(object):
 	def __init__(self):
 		self.__module_cache = {}
 		self.__properties = Pom.Properties.create_root()
+		
 		self.__global_settings = Pom.Settings.create('${env.M2_HOME}/conf/settings.xml', self.__properties)
 		self.__user_settings = Pom.Settings.create('${user.home}/.m2/settings.xml', self.__properties)
-		self.__user_settings.merge(self.__global_settings)
+		self.user_settings.merge(self.__global_settings)
+		
+		default_storage = Pom.ArtifactStorage.create_default(self.user_settings.local_repository)
+		self.__storage = Pom.ArtifactStorage(default_storage)
+		for profile in self.user_settings.active_profiles:
+			self.storage.add(profile.repositories, self.user_settings.mirrors)
 	
 	@property
 	def properties(self):
@@ -64,6 +70,10 @@ class Pom(object):
 	@property
 	def user_settings(self):
 		return self.__user_settings
+	
+	@property
+	def storage(self):
+		return self.__storage
 	
 	class Settings(object):
 		def __init__(self, properties):
@@ -214,6 +224,13 @@ class Pom(object):
 		def mirror_layouts(self):
 			return self.__mirror_layouts
 		
+		def get_mirror(self, repository):
+			if self.mirror_of == repository.id and mirror.match_layout(repository.layout):
+				return self
+			if self.match_repository(repository) and self.match_layout(repository.layout):
+				return self
+			return None
+		
 		def match_layout(self, mirror_layout):
 			if len(self.mirror_layouts) == 0 or mirror_layout == '*':
 				return True
@@ -284,12 +301,9 @@ class Pom(object):
 		def __repr__(self):
 			return "{0}(id='{1}', of='{2}', url={3}, name='{4}')".format(self.__class__.__name__, self.id, self.mirror_of, self.url, self.name)
 	
-	class ArtifactRepositories(dict):
+	class ArtifactRepositories(list):
 		def __init__(self, *args, **kwargs):
-			dict.__init__(self, *args, **kwargs)
-		
-		def add(self, repository):
-			self[repository.id] = repository
+			list.__init__(self, *args, **kwargs)
 		
 		@classmethod
 		def create(cls, xroot, plugins=False):
@@ -300,7 +314,7 @@ class Pom(object):
 				repository = Pom.ArtifactRepository.create(xrepository)
 				if repository is None: 
 					continue
-				repositories.add(repository) 
+				repositories.append(repository) 
 			return repositories
 	
 	class ArtifactRepository(object):
@@ -311,9 +325,8 @@ class Pom(object):
 				layout = 'default'
 			self.__layout = layout
 			self.__name = ''
-			self.__default_policy = Pom.RepositoryPolicy()
-			self.__releases = self.__default_policy
-			self.__snapshots = self.__default_policy
+			self.__releases = Pom.RepositoryPolicy()
+			self.__snapshots = Pom.RepositoryPolicy()
 		
 		@property
 		def id(self):
@@ -339,10 +352,10 @@ class Pom(object):
 		def snapshots(self):
 			return self.__snapshots
 		
-		@property
-		def is_external(self):
+		@staticmethod
+		def is_external_url(url):
 			try:
-				d = rfc3987.parse(self.url, rule='URI')
+				d = rfc3987.parse(url, rule='URI')
 				if d['host'] == 'localhost' or d['host'] == '127.0.0.1':
 					return False
 				elif d['scheme'] == 'file':
@@ -350,6 +363,21 @@ class Pom(object):
 				return True
 			except ValueError:
 				return False
+		
+		@property
+		def is_external(self):
+			return self.__class__.is_external_url(self.url)
+		
+		def set_mirror(self, mirror):
+			if mirror is not None:
+				self.__url = mirror.url
+		
+		def clone(self):
+			o = self.__class__(self.id, self.url, self.layout)
+			o.__name = self.name
+			o.__releases = self.releases
+			o.__snapshots = self.snapshots
+			return o
 		
 		@classmethod
 		def create(cls, xrepository):
@@ -364,13 +392,92 @@ class Pom(object):
 			repository.__snapshots = Pom.RepositoryPolicy.create(Pom.Xml.get_node(xrepository, 'snapshots'))
 			return repository
 		
-		def __str__(self):
-			out = 'id={0}, url={1}, layout={2}'.format(self.id, self.url, self.layout)
-			if self.releases != self.__default_policy:
-				out += ', releases={0}'.format(self.releases)
-			if self.snapshots != self.__default_policy:
-				out += ', snapshots={0}'.format(self.snapshots)
+		@staticmethod
+		def get_str(repository):
+			out = 'id={0}, url={1}, layout={2}'.format(repository.id, repository.url, repository.layout)
+			default_policy = Pom.RepositoryPolicy()
+			if repository.releases != default_policy:
+				out += ', releases={0}'.format(repository.releases)
+			if repository.snapshots != default_policy:
+				out += ', snapshots={0}'.format(repository.snapshots)
 			return out
+		
+		def __str__(self):
+			return self.__class__.get_str(self)
+		
+		def __repr__(self):
+			return '{0}({1})'.format(self.__class__.__name__, str(self))
+	
+	class ArtifactStorage(object):
+		def __init__(self, parent = None):
+			self.__local = []
+			self.__remote = []
+			if parent is None:
+				return
+			for repository in parent.local:
+				self.add(repository)
+			for repository in parent.remote:
+				self.add(repository)
+		
+		@property
+		def local(self):
+			return self.__local
+		
+		@property
+		def remote(self):
+			return self.__remote
+		
+		def _add_repository(self, repositories, repository):
+			pos = -1
+			idx = 0
+			for r in repositories:
+				if r.id == repository.id:
+					pos = idx
+					break
+				idx += 1
+			if pos > -1:
+				repositories[pos] = repository
+			else:
+				repositories.append(repository)
+			
+		def add(self, repositories, mirrors = None):
+			if hasattr(repositories, '__iter__'):
+				if len(repositories) == 0:
+					return
+				for repository in repositories:
+					self.add(repository, mirrors)
+			else:
+				repository = repositories
+				mirror = None
+				if mirrors is not None and hasattr(mirrors, 'get_mirror'):
+					mirror = mirrors.get_mirror(repository)
+				if mirror is not None:
+					repository = repository.clone()
+					repository.set_mirror(mirror)
+				if repository.is_external:
+					self._add_repository(self.remote, repository)
+				else:
+					self._add_repository(self.local, repository)
+		
+		@classmethod
+		def create_default(cls, local_repository_path):
+			storage = cls()
+			repository = Pom.ArtifactRepository('local', local_repository_path)
+			storage.add(repository)
+			repository = Pom.ArtifactRepository('central', 'https://repo.maven.apache.org/maven2')
+			storage.add(repository)
+			repository = Pom.ArtifactRepository('apache.snapshots', 'http://repository.apache.org/snapshots')
+			storage.add(repository)
+			return storage
+		
+		def __str__(self):
+			out = ''
+			if len(self.local) > 0:
+				out += 'local={0}'.format(self.local)
+			if len(self.remote) > 0:
+				if len(out) > 0: out += ', '
+				out += 'remote={0}'.format(self.remote)
+			return '{' + out + '}' 
 		
 		def __repr__(self):
 			return '{0}({1})'.format(self.__class__.__name__, str(self))
@@ -2011,6 +2118,8 @@ class Pom(object):
 			self.__dependencies = Pom.Dependencies()
 			self.__modules = Pom.Modules()
 			self.__profiles = Pom.Profiles()
+			self.__repositories = Pom.ArtifactRepositories()
+			self.__plugin_repositories = Pom.ArtifactRepositories()
 		
 		@property
 		def io(self):
@@ -2052,6 +2161,18 @@ class Pom(object):
 				dependencies.update(stack.pop())
 			dependencies.update(self.dependencies.managed)
 			return dependencies
+		
+		@property
+		def repositories(self):
+			return self.__repositories
+		
+		@property
+		def plugin_repositories(self):
+			return self.__plugin_repositories
+		
+		def update_repositories(self, repositories, plugin_repositories):
+			self.__repositories = repositories
+			self.__plugin_repositories = plugin_repositories
 		
 		def show_graph(self, bgc = None, matched = False):
 			if bgc is None:
@@ -2119,7 +2240,9 @@ class Pom(object):
 			
 			parent_properties = module.parent.properties if module.parent else pom.properties
 			module.__properties = Pom.Properties.create(xroot, parent_properties, pom_io)
-			
+			repositories = Pom.ArtifactRepositories.create(xroot, False)
+			plugin_repositories = Pom.ArtifactRepositories.create(xroot, True)
+			module.update_repositories(repositories, plugin_repositories)
 			Pom.Dependencies.populate(module, xroot)
 			
 			module.__modules = Pom.Modules.create(pom_io, xroot, module)
@@ -2155,7 +2278,7 @@ class Pom(object):
 			return profiles
 	
 	class Profile(BuildWeight):
-		def __init__(self, pom_io, name, properties, modules, activation, repositories, plugin_repositories):
+		def __init__(self, pom_io, name, properties, modules, activation):
 			super(self.__class__, self).__init__()
 			self.__depth = 0
 			self.__io = pom_io
@@ -2163,8 +2286,8 @@ class Pom(object):
 			self.__properties = properties
 			self.__modules = modules
 			self.__activation = activation
-			self.__repositories = repositories
-			self.__plugin_repositories = plugin_repositories
+			self.__repositories = Pom.ArtifactRepositories()
+			self.__plugin_repositories = Pom.ArtifactRepositories()
 		
 		@property
 		def depth(self):
@@ -2198,6 +2321,10 @@ class Pom(object):
 		def plugin_repositories(self):
 			return self.__plugin_repositories
 		
+		def update_repositories(self, repositories, plugin_repositories):
+			self.__repositories = repositories
+			self.__plugin_repositories = plugin_repositories
+		
 		def show_graph(self, bgc = None, matched = False):
 			if bgc is None:
 				bgc = Pom.BuildGraphConf()
@@ -2216,14 +2343,10 @@ class Pom(object):
 			properties = Pom.Properties.create(xprofile, parent_properties)
 			modules = Pom.Modules.create(pom_io, xprofile, module)
 			activation = Pom.ProfileActivation.parse(xprofile)
-			root_tag = Pom.Xml.get_clean_tag(Pom.Xml.get_root_node(xprofile))
-			if root_tag == 'settings':
-				repositories = Pom.ArtifactRepositories.create(xprofile, False)
-				plugin_repositories = Pom.ArtifactRepositories.create(xprofile, True)
-			else:
-				repositories = None
-				plugin_repositories = None
-			profile = Pom.Profile(pom_io, name, properties, modules, activation, repositories, plugin_repositories)
+			repositories = Pom.ArtifactRepositories.create(xprofile, False)
+			plugin_repositories = Pom.ArtifactRepositories.create(xprofile, True)
+			profile = Pom.Profile(pom_io, name, properties, modules, activation)
+			profile.update_repositories(repositories, plugin_repositories)
 			profile.__depth = (module.depth if module else 0) + 1
 			return profile
 		
