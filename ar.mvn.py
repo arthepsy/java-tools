@@ -2135,9 +2135,8 @@ class Pom(object):
 			return modules
 	
 	class Module(BuildNode):
-		def __init__(self, pom_io, artifact):
+		def __init__(self, artifact):
 			super(self.__class__, self).__init__()
-			self.__io = pom_io
 			self.__artifact = artifact
 			self.__parent = None
 			self.__dependencies = Pom.Dependencies()
@@ -2146,10 +2145,6 @@ class Pom(object):
 		@property
 		def pure_weight(self):
 			return 1.0000
-		
-		@property
-		def io(self):
-			return self.__io
 		
 		@property
 		def artifact(self):
@@ -2233,7 +2228,7 @@ class Pom(object):
 			artifact = Pom.Artifact.parse(xroot, Pom.ArtifactOrigin.PROJECT)
 			if artifact is None:
 				return None
-			module = Pom.Module(pom_io, artifact)
+			module = Pom.Module(artifact)
 			pom.module_cache[pom_io.file_path] = module
 			
 			if parent is not None:
@@ -2288,13 +2283,12 @@ class Pom(object):
 			return profiles
 	
 	class Profile(BuildNode):
-		def __init__(self, pom_io, name, properties, activation):
+		def __init__(self, name, properties, activation):
 			super(self.__class__, self).__init__()
-			self.__depth = 0
-			self.__io = pom_io
 			self.__name = name
-			self._set_properties(properties)
 			self.__activation = activation
+			self.__depth = 0
+			self._set_properties(properties)
 		
 		@property
 		def pure_weight(self):
@@ -2303,10 +2297,6 @@ class Pom(object):
 		@property
 		def depth(self):
 			return self.__depth
-		
-		@property
-		def io(self):
-			return self.__io
 		
 		@property
 		def name(self):
@@ -2333,7 +2323,7 @@ class Pom(object):
 			parent_properties = module.properties if module else None
 			properties = Pom.Properties.create(xprofile, parent_properties)
 			activation = Pom.ProfileActivation.parse(xprofile)
-			profile = Pom.Profile(pom_io, name, properties, activation)
+			profile = Pom.Profile(name, properties, activation)
 			
 			repositories = Pom.ArtifactRepositories.create(xprofile, False)
 			plugin_repositories = Pom.ArtifactRepositories.create(xprofile, True)
