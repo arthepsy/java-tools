@@ -2038,16 +2038,16 @@ class Pom(object):
 			self.__plugin_repositories = Pom.ArtifactRepositories()
 			self.__modules = Pom.Modules()
 		
+		def _raise(self, method):
+			raise NotImplementedError("{0}.{1}".format(self.__class__.__name__, method))
+		
 		@property
 		def pure_weight(self):
-			raise NotImplementedError("{0}.{1}".format(self.__class__.__name__, 'pure_weight'))
+			self._raise('pure_weight')
 		
 		@property
 		def depth(self):
-			if self.parent is None:
-				return 0
-			else:
-				return self.parent.depth + 1
+			self._raise('depth')
 		
 		@property
 		def properties(self):
@@ -2146,6 +2146,13 @@ class Pom(object):
 		def pure_weight(self):
 			return 1.0000
 		
+		@property
+		def depth(self):
+			if self.parent is None:
+				return 0
+			else:
+				return self.parent.depth + 1
+
 		@property
 		def artifact(self):
 			return self.__artifact
