@@ -43,7 +43,7 @@ class Config(object):
 
 class Pom(object):
 	def __init__(self):
-		self.__module_cache = {}
+		self.__module_cache = Pom.ModuleCache()
 		self.__properties = Pom.Properties.create_root()
 		
 		self.__global_settings = Pom.Settings.create('${env.M2_HOME}/conf/settings.xml', self.__properties)
@@ -547,6 +547,40 @@ class Pom(object):
 		
 		def __repr__(self):
 			return '{0}({1})'.format(self.__class__.__name__, str(self))
+	
+	class ModuleCache(object):
+		def __init__(self):
+			self.__modules = {}
+		
+		def add(self, module_filepath, module):
+			if not module_filepath in self.__modules:
+				self.__modules[module_filepath] = []
+			self.__modules[module_filepath].append(module)
+		
+		def get(self, module_filepath, parent):
+			if not module_filepath in self.__modules:
+				return None
+			for module in self.__modules[module_filepath]:
+				if self._match(module, parent):
+					return module
+			return None
+		
+		def _match(self, module, parent):
+			if module.parent == parent:
+				return True
+			if module.parent is None or module.parent.node_type == Pom.Module.TYPE:
+				if parent is None or parent.node_type == Pom.Module.TYPE:
+					return True
+				elif parent.node_type == Pom.Profile.TYPE:
+					se = Pom.ProfileSideEffect.create(parent,module)
+					return not se.is_empty
+			elif module.parent.node_type == Pom.Profile.TYPE:
+				if parent is None or parent.node_type == Pom.Module.TYPE:
+					se = Pom.ProfileSideEffect.create(module.parent, parent)
+					return not se.is_empty
+				elif parent.node_type == Pom.Profile.TYPE:
+					return Pom.ProfileSideEffect.are_same(module.parent, parent, module)
+			return False
 	
 	class BuildGraphConf(object):
 		def __init__(self, modules = None, profiles = None, level = 0):
@@ -2033,6 +2067,7 @@ class Pom(object):
 	class BuildNode(object):
 		def __init__(self):
 			self.__weight_cache = {}
+			self.__parent = None
 			self.__properties = Pom.Properties()
 			self.__repositories = Pom.ArtifactRepositories()
 			self.__plugin_repositories = Pom.ArtifactRepositories()
@@ -2042,12 +2077,20 @@ class Pom(object):
 			raise NotImplementedError("{0}.{1}".format(self.__class__.__name__, method))
 		
 		@property
+		def node_type(self):
+			return self.__class__.TYPE
+		
+		@property
 		def pure_weight(self):
-			self._raise('pure_weight')
+			return self.__class__.WEIGHT
 		
 		@property
 		def depth(self):
 			self._raise('depth')
+		
+		@property
+		def parent(self):
+			return self.__parent
 		
 		@property
 		def properties(self):
@@ -2064,6 +2107,15 @@ class Pom(object):
 		@property
 		def modules(self):
 			return self.__modules
+		
+		def get_parent(self, node_type):
+			parent = self.parent
+			while parent is not None and parent.node_type != node_type:
+				parent = parent.parent
+			return parent
+		
+		def _set_parent(self, parent):
+			self.__parent = parent
 		
 		def _set_properties(self, properties):
 			self.__properties = properties
@@ -2124,42 +2176,33 @@ class Pom(object):
 				#modules[module_name] = None
 				if os.path.isdir(os.path.join(pom_io.dir_path, module_name)):
 					pom_file = os.path.join(pom_io.dir_path, module_name, 'pom.xml')
-					pom_module = Pom.Module.create(pom_file, parent)
-					if pom_module is not None:
-						modules[module_name] = pom_module
 				else:
 					pom_file = os.path.join(pom_io.dir_path, module_name)
-					pom_module = Pom.Module.create(pom_file, parent)
-					if pom_module is not None:
-						modules[module_name] = pom_module
+				pom_module = Pom.Module.create(pom_file, parent)
+				if pom_module is not None:
+					modules[module_name] = pom_module
 			return modules
 	
 	class Module(BuildNode):
+		TYPE, WEIGHT = 'module', 1.0000
+		
 		def __init__(self, artifact):
 			super(self.__class__, self).__init__()
 			self.__artifact = artifact
-			self.__parent = None
 			self.__dependencies = Pom.Dependencies()
 			self.__profiles = Pom.Profiles()
 		
 		@property
-		def pure_weight(self):
-			return 1.0000
-		
-		@property
 		def depth(self):
-			if self.parent is None:
+			parent = self.get_parent(self.TYPE)
+			if parent is None:
 				return 0
 			else:
-				return self.parent.depth + 1
-
+				return parent.depth + 1
+		
 		@property
 		def artifact(self):
 			return self.__artifact
-		
-		@property
-		def parent(self):
-			return self.__parent
 		
 		@property
 		def dependencies(self):
@@ -2173,10 +2216,10 @@ class Pom(object):
 		def all_managed_dependencies(self):
 			dependencies = Pom.Dependencies()
 			stack = []
-			parent = self.parent
+			parent = self.get_parent(self.TYPE)
 			while parent is not None:
 				stack.append(parent.dependencies.managed)
-				parent = parent.parent
+				parent = parent.get_parent(self.TYPE)
 			while stack:
 				dependencies.update(stack.pop())
 			dependencies.update(self.dependencies.managed)
@@ -2212,8 +2255,9 @@ class Pom(object):
 				if os.path.isfile(parent_filepath):
 					parent_path = parent_filepath
 			if parent_path is not None:
-				if parent_path in pom.module_cache:
-					return pom.module_cache[parent_path]
+				cached_module = pom.module_cache.get(parent_path, None)
+				if cached_module is not None:
+					return cached_module
 				return Pom.Module.create(Pom.IO(parent_path))
 			return None
 		
@@ -2223,8 +2267,9 @@ class Pom(object):
 				pom_io = Pom.IO(pom_io)
 			if not os.path.isfile(pom_io.file_path):
 				return None
-			if pom_io.file_path in pom.module_cache:
-				return pom.module_cache[pom_io.file_path]
+			cached_module = pom.module_cache.get(pom_io.file_path, parent)
+			if cached_module is not None:
+				return cached_module
 			
 			parser = etree.XMLParser(recover=True)
 			xtree = etree.parse(pom_io.file_path, parser)
@@ -2236,15 +2281,19 @@ class Pom(object):
 			if artifact is None:
 				return None
 			module = Pom.Module(artifact)
-			pom.module_cache[pom_io.file_path] = module
 			
 			if parent is not None:
-				module.__parent = parent
+				module._set_parent(parent)
 			else:
 				if artifact.parent is not None:
-					module.__parent = Pom.Module._parse_parent(xroot, pom_io, artifact)
+					module._set_parent(Pom.Module._parse_parent(xroot, pom_io, artifact))
+					cached_module = pom.module_cache.get(pom_io.file_path, module.parent)
+					if cached_module is not None:
+						return cached_module
 				else:
-					module.__parent = None
+					module._set_parent(None)
+			
+			pom.module_cache.add(pom_io.file_path, module)
 			
 			parent_properties = module.parent.properties if module.parent else pom.properties
 			properties = Pom.Properties.create(xroot, parent_properties, pom_io)
@@ -2290,16 +2339,14 @@ class Pom(object):
 			return profiles
 	
 	class Profile(BuildNode):
+		TYPE, WEIGHT = 'profile', 0.0001
+		
 		def __init__(self, name, properties, activation):
 			super(self.__class__, self).__init__()
 			self.__name = name
 			self.__activation = activation
 			self.__depth = 0
 			self._set_properties(properties)
-		
-		@property
-		def pure_weight(self):
-			return 0.0001
 		
 		@property
 		def depth(self):
@@ -2331,22 +2378,19 @@ class Pom(object):
 			properties = Pom.Properties.create(xprofile, parent_properties)
 			activation = Pom.ProfileActivation.parse(xprofile)
 			profile = Pom.Profile(name, properties, activation)
-			
+			profile._set_parent(module)
 			repositories = Pom.ArtifactRepositories.create(xprofile, False)
 			plugin_repositories = Pom.ArtifactRepositories.create(xprofile, True)
 			profile._set_repositories(repositories, plugin_repositories)
 			
-			modules = Pom.Modules.create(pom_io, xprofile, module)
+			modules = Pom.Modules.create(pom_io, xprofile, profile)
 			profile._set_modules(modules)
 			
 			profile.__depth = (module.depth if module else 0) + 1
 			return profile
 		
-		def __str__(self):
-			return self.name
-		
 		def __repr__(self):
-			return "Pom.Profile(%s)" % str(self)
+			return "{0}({1})".format(self.__class__.__name__, self.name)
 	
 	class OS(object):
 		def __init__(self, name, family, arch, version):
@@ -2640,6 +2684,63 @@ class Pom(object):
 				property_value = None
 			return cls(by_default, jdk, os, property_name, property_value)
 	
+	class ProfileSideEffect(object):
+		def __init__(self):
+			self.__properties = {}
+		
+		@property
+		def properties(self):
+			return self.__properties
+		
+		@property
+		def is_empty(self):
+			return len(self.properties) == 0
+		
+		@classmethod
+		def are_same(cls, profile1, profile2, module):
+			se1 = cls.create(profile1, module)
+			se2 = cls.create(profile2, module)
+			return se1 == se2
+		
+		@classmethod
+		def create(cls, profile, module):
+			sideeffect = cls()
+			for k, v in profile.properties.items():
+				if module is not None:
+					if k in module.properties and module.properties[k] == v:
+						continue
+					found = False
+					parent = module.parent
+					while not found and parent is not None:
+						if k in parent.properties and parent.properties[k] == v:
+							found = True
+						parent = parent.parent
+					if found:
+						continue
+				sideeffect.properties[k] = v
+			return sideeffect
+		
+		@classmethod
+		def has(cls, profile, module):
+			o = cls.create(profile, module)
+			return o.is_empty
+		
+		def __eq__(self, other):
+			if not isinstance(other, self.__class__):
+				return False
+			if self.properties != other.properties:
+				return False
+			return True
+		
+		def __ne__(self, other):
+			return not self.__eq__(other)
+		
+		def __repr__(self):
+			props = ''
+			if len(self.properties) > 0:
+				props += 'properties={0}'.format(self.properties)
+			return '{0}({1})'.format(self.__class__.__name__, props)
+	
 	class BuildPath(object):
 		def __init__(self, profiles = set(), properties = {}):
 			self.profiles = set()
@@ -2929,20 +3030,20 @@ class Maven(object):
 			pomtree.write(self.pom_file, encoding='UTF-8', xml_declaration=True)
 	
 	def how_to_build(self, modules, profiles, excludes, show_weigth=False):
-		pom = Pom.Module.create(self.pom_file)
-		bpm = Pom.BuildPathMap.create(pom)
+		module = Pom.Module.create(self.pom_file)
+		bpm = Pom.BuildPathMap.create(module)
 		bps = bpm.get_buildpaths(modules, profiles, excludes)
 		
-		sorted_bps = sorted(bps, key=lambda item: pom.get_weight(item))
+		sorted_bps = sorted(bps, key=lambda item: module.get_weight(item))
 		for bp in sorted_bps:
 			if show_weigth:
-				print "%.4f\t%s" % (pom.get_weight(bp), bp.get_cmdline())
+				print "%.4f\t%s" % (module.get_weight(bp), bp.get_cmdline())
 			else:
 				print "%s" % bp.get_cmdline()
 	
 	def show_dependencies(self, show_tree):
-		pom = Pom.Module.create(self.pom_file)
-		for v in sorted(pom.dependencies.values(), key=lambda d: (d.scope, d.artifact.get_module_id())):
+		module = Pom.Module.create(self.pom_file)
+		for v in sorted(module.dependencies.values(), key=lambda d: (d.scope, d.artifact.get_module_id())):
 			print v
 
 class CmdLine(object):
