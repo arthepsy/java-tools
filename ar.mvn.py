@@ -327,6 +327,7 @@ class Pom(object):
 			self.__name = ''
 			self.__releases = Pom.RepositoryPolicy()
 			self.__snapshots = Pom.RepositoryPolicy()
+			self.__mirror = None
 		
 		@property
 		def id(self):
@@ -334,7 +335,10 @@ class Pom(object):
 		
 		@property
 		def url(self):
-			return self.__url
+			if self.mirror is not None:
+				return self.mirror.url
+			else:
+				return self.__url
 		
 		@property
 		def layout(self):
@@ -351,6 +355,14 @@ class Pom(object):
 		@property
 		def snapshots(self):
 			return self.__snapshots
+		
+		@property
+		def mirror(self):
+			return self.__mirror
+		
+		@property
+		def mirrored(self):
+			return self.mirror is not None
 		
 		@staticmethod
 		def is_external_url(url):
@@ -370,7 +382,7 @@ class Pom(object):
 		
 		def set_mirror(self, mirror):
 			if mirror is not None:
-				self.__url = mirror.url
+				self.__mirror = mirror
 		
 		def clone(self):
 			o = self.__class__(self.id, self.url, self.layout)
