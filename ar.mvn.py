@@ -439,7 +439,7 @@ class Pom(object):
 				repositories[pos] = repository
 			else:
 				repositories.append(repository)
-			
+		
 		def add(self, repositories, mirrors = None):
 			if hasattr(repositories, '__iter__'):
 				if len(repositories) == 0:
@@ -2071,6 +2071,7 @@ class Pom(object):
 			self.__properties = Pom.Properties()
 			self.__repositories = Pom.ArtifactRepositories()
 			self.__plugin_repositories = Pom.ArtifactRepositories()
+			self.__storage = None
 			self.__modules = Pom.Modules()
 		
 		def _raise(self, method):
@@ -2105,6 +2106,22 @@ class Pom(object):
 			return self.__plugin_repositories
 		
 		@property
+		def storage(self):
+			if self.__storage is not None:
+				return self.__storage
+			else:
+				if self.parent is not None:
+					storage = self.parent.storage
+				else:
+					storage = pom.storage
+				if self.repositories is not None and len(self.repositories) > 0:
+					storage = Pom.ArtifactStorage(storage)
+					for repository in self.repositories:
+						storage.add(repository)
+				self.__storage = storage
+				return storage
+		
+		@property
 		def modules(self):
 			return self.__modules
 		
@@ -2123,6 +2140,8 @@ class Pom(object):
 		def _set_repositories(self, repositories, plugin_repositories):
 			self.__repositories = repositories
 			self.__plugin_repositories = plugin_repositories
+			if len(repositories) > 0:
+				self.__storage = None
 		
 		def _set_modules(self, modules):
 			self.__modules = modules
