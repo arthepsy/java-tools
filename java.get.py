@@ -74,7 +74,7 @@ def get_jdk(arch, major, minor, build):
 	os.system(cmd)
 
 MAVEN = { 'archive': ['2.0.8', '2.0.9', '2.0.10', '2.0.11', '2.1.0', '2.2.0', '2.2.1', '3.0', '3.0.1', '3.0.2', '3.0.3', '3.0.4', '3.0.4', '3.0.5', '3.1.0', '3.1.1', '3.2.1', '3.2.2', '3.2.3'],
-          'current': ['3.0.5', '3.1.1', '3.2.5', '3.3.1'],
+          'current': ['3.0.5', '3.1.1', '3.2.5', '3.3.1', '3.3.3'],
           'legacy_archive_url': 'http://archive.apache.org/dist/maven/binaries/',
           'archive_url': 'http://archive.apache.org/dist/maven/maven-3/',
           'current_url': 'http://mirror.nexcess.net/apache/maven/maven-3/'}
