@@ -24,7 +24,8 @@ Java tools (e.g, jdk &amp; maven environment)
   ```
   ./jetty.obf.py password
   OBF:1v2j1uum1xtv1zej1zer1xtn1uvk1v1v
-  
+  ```
+  ```
   ./jetty.obf.py OBF:1v2j1uum1xtv1zej1zer1xtn1uvk1v1v
   password
   ```
