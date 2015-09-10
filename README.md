@@ -19,5 +19,15 @@ Java tools (e.g, jdk &amp; maven environment)
   misc.class: com.example.code.Domain$Trait$FieldHelper
   ```
 
+* `jetty.obf.py` -- string (de)obfuscator from Jetty
+
+  ```
+  ./jetty.obf.py password
+  OBF:1v2j1uum1xtv1zej1zer1xtn1uvk1v1v
+  
+  ./jetty.obf.py OBF:1v2j1uum1xtv1zej1zer1xtn1uvk1v1v
+  password
+  ```
+
 * `ar.mvn.py` -- Maven project analyzer  
 
