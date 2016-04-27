@@ -45,7 +45,7 @@ def _num(s):
 
 JDK_ARCH = {'x64' : 'x64', 'x86_64': 'x64', 'x86': 'i586', 'i386': 'i586', 'i586': 'i586', 'i686': 'i586', 'amd64': 'x64' }
 JDK = { 7: { 80: 15, 79: 15, 76: 13, 75: 13, 72: 14, 71: 14, 67: 1, 65: 17, 60: 19, 55: 13, 51: 13, 45: 18, 40: 43, 25: 15, 21: 12, 17: 2, 15: 3, 13: 20, 11: 21, 10: 18, 9: 5, 7: 10, 6: 24, 5: 6, 4: 20, 3: 4, 2: 13, 1: 8 },
-        8: { 66: 17, 65: 17, 60: 27, 51: 16, 45: 14, 40: 25, 31: 13, 25: 17, 20: 26, 11: 12, 5: 13, 0: 132 }}
+        8: { 92: 14, 91: 14, 77: 3, 74: 2, 73: 2, 72: 15, 71: 15, 66: 17, 65: 17, 60: 27, 51: 16, 45: 14, 40: 25, 31: 13, 25: 17, 20: 26, 11: 12, 5: 13, 0: 132 }}
 def check_jdk(arch, major):
 	if not major in JDK:
 		raise click.UsageError('<major> "{0}" is not a major version of JDK.'.format(major))
@@ -62,6 +62,8 @@ def get_jdk(arch, major, minor, build):
 		raise click.UsageError('<minor> "{0}" is not a known version of JDK{1}. Available versions: {2}\n'.format(minor, major, jdk_list))
 	if build is None:
 		build=JDK[major][minor]
+        if build < 10:
+            build = '0{}'.format(build)
 	minor = 'u' + str(minor) if minor > 0 else ''
 	cookie = "gpw_e24=http%3A%2F%2Fwww.oracle.com%2F; oraclelicense=accept-securebackup-cookie"
 	url = "http://download.oracle.com/otn-pub/java/jdk/{1}{2}-b{3}/jdk-{1}{2}-linux-{0}.tar.gz".format(arch, major, minor, build)
